@@ -69,7 +69,7 @@
 3. Extract ngrok.exe to a folder
 4. Get your Auth Token from the ngrok dashboard
 5. Open command prompt in the folder containing ngrok.exe
-6. Run the command: `ngrok authtoken YOUR_AUTH_TOKEN`
+6. Run the command: `ngrok config add-authtoken $YOUR_AUTHTOKEN`
 
 ### Required Python Packages
 Install all dependencies with this command:
