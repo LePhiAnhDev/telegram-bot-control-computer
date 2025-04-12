@@ -177,6 +177,7 @@ python Bot_Control_Computer.py
 | `/mouse_virtual_system` | Control mouse with virtual touchpad |
 | `/volume_virtual_system` | Control volume with virtual touchpad |
 | `/keyboard_emulator` | Control with virtual keyboard |
+| `/set_language` | Change display language |
 
 ---
 
