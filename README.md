@@ -3,6 +3,7 @@
   <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
   <img src="https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
   <img src="https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white" alt="OpenCV">
+  <img src="https://img.shields.io/badge/Ngrok-1F1E37?style=for-the-badge&logo=ngrok&logoColor=white" alt="Ngrok">
 </div>
 
 <h1 align="center">🤖 Advanced Computer Control Telegram Bot 🖥️</h1>
@@ -11,17 +12,11 @@
   <em>Remote control your computer with an elegant, feature-rich Telegram bot</em>
 </p>
 
-<p align="center">
-  <img src="https://github.com/LePhiAnhDev/assets/raw/main/telegram-bot-control.png" alt="Bot Control Computer" width="80%">
-</p>
-
 <div align="center">
   <a href="#-key-features">Features</a> •
   <a href="#-requirements">Requirements</a> •
-  <a href="#%EF%B8%8F-installation">Installation</a> •
   <a href="#-usage">Usage</a> •
-  <a href="#%EF%B8%8F-packaging-as-executable">Packaging</a> •
-  <a href="#%EF%B8%8F-important-notes">Notes</a>
+  <a href="#%EF%B8%8F-packaging-as-executable">Packaging</a>
 </div>
 
 ---
@@ -65,100 +60,60 @@
 ### System Requirements
 - Windows OS (primary target, most features supported)
 - Linux/Mac (limited functionality for some features)
-- Python 3.7 or higher
+- Python 3.10.11
 - Admin privileges (recommended for full functionality)
 
+### Ngrok Setup
+1. Visit [ngrok.com](https://ngrok.com) and create an account
+2. Download ngrok from the website
+3. Extract ngrok.exe to a folder
+4. Get your Auth Token from the ngrok dashboard
+5. Open command prompt in the folder containing ngrok.exe
+6. Run the command: `ngrok authtoken YOUR_AUTH_TOKEN`
+
 ### Required Python Packages
+Install all dependencies with this command:
 ```bash
-# Core functionality
-python-telegram-bot>=13.0
-pyautogui
-opencv-python
-python-dotenv
-nest_asyncio
-numpy
-playwright
-pynput
+pip install oscpy regex pyautogui nest_asyncio numpy opencv-python comtypes pynput playwright python-telegram-bot python-dotenv flask pyngrok pycaw pyinstaller
+```
 
-# Virtual touchpad/volume control
-flask
-pyngrok
-
-# Windows-specific audio control (optional)
-pycaw
-comtypes
+Then install the Playwright browsers:
+```bash
+playwright install
 ```
 
 ### API Keys/Tokens
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Ngrok Auth Token (optional, for virtual touchpad/volume control)
-
----
-
-## ⚙️ Installation
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/yourusername/computer-control-telegram-bot.git
-cd computer-control-telegram-bot
-```
-
-### 2. Set up virtual environment (optional but recommended)
-```bash
-python -m venv venv
-# On Windows
-venv\Scripts\activate
-# On Linux/Mac
-source venv/bin/activate
-```
-
-### 3. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Install Playwright browsers
-```bash
-python -m playwright install
-```
-
-### 5. Configure the environment variables
-Create a `.env` file in the project directory with the following:
-```
-TOKEN=your_telegram_bot_token_here
-ALLOWED_USERS=your_telegram_user_id,another_user_id
-NGROK_AUTH_TOKEN=your_ngrok_auth_token_here
-```
-
-### 6. Customize settings (optional)
-Open `Bot_Control_Computer.py` and adjust settings like:
-- `DEFAULT_UPLOAD_FOLDER`: Default folder for uploaded files
-- `BROWSER_PATHS`: Custom browser executable paths
-- `FLASK_PORT`: Port for the virtual touchpad server
 
 ---
 
 ## 🚀 Usage
 
 ### Starting the Bot
+1. Create a `.env` file with the following content:
+```
+TOKEN=your_telegram_bot_token_here
+ALLOWED_USERS=your_telegram_user_id,another_user_id
+NGROK_AUTH_TOKEN=your_ngrok_auth_token_here
+```
+
+2. Run the bot:
 ```bash
 python Bot_Control_Computer.py
 ```
 
+---
+
 ### Available Commands
 
-<details>
-<summary><b>⚡️ Introduction Commands</b></summary>
+#### ⚡️ Introduction Commands
 
 | Command | Description |
 |---------|-------------|
 | `/introduce` | Introduction about the author |
 | `/menu` | Display list of all commands |
 
-</details>
-
-<details>
-<summary><b>⚡️ System Control Commands</b></summary>
+#### ⚡️ System Control Commands
 
 | Command | Description |
 |---------|-------------|
@@ -167,20 +122,14 @@ python Bot_Control_Computer.py
 | `/sleep` | Put computer to sleep mode |
 | `/cancel` | Cancel all shutdown/restart commands |
 
-</details>
-
-<details>
-<summary><b>⚡️ Image Commands</b></summary>
+#### ⚡️ Image Commands
 
 | Command | Description |
 |---------|-------------|
 | `/screen_shot` | Take a screenshot and send it |
 | `/record_video` | Record screen and send the video |
 
-</details>
-
-<details>
-<summary><b>⚡️ File Management Commands</b></summary>
+#### ⚡️ File Management Commands
 
 | Command | Description |
 |---------|-------------|
@@ -188,10 +137,7 @@ python Bot_Control_Computer.py
 | `/download_file` | Download a file from your PC to Telegram |
 | `/deletefile` | Delete a file at the specified path |
 
-</details>
-
-<details>
-<summary><b>⚡️ System Information Commands</b></summary>
+#### ⚡️ System Information Commands
 
 | Command | Description |
 |---------|-------------|
@@ -201,10 +147,7 @@ python Bot_Control_Computer.py
 | `/whoami` | Current logged-in user |
 | `/hostname` | Display computer name |
 
-</details>
-
-<details>
-<summary><b>⚡️ Network Commands</b></summary>
+#### ⚡️ Network Commands
 
 | Command | Description |
 |---------|-------------|
@@ -212,10 +155,7 @@ python Bot_Control_Computer.py
 | `/release` | Release current IP address |
 | `/renew` | Renew IP address |
 
-</details>
-
-<details>
-<summary><b>⚡️ Browser Commands</b></summary>
+#### ⚡️ Browser Commands
 
 | Command | Description |
 |---------|-------------|
@@ -223,10 +163,7 @@ python Bot_Control_Computer.py
 | `/openweb` | Open websites |
 | `/setbrowser` | Set default browser (chrome, brave, edge, opera) |
 
-</details>
-
-<details>
-<summary><b>⚡️ Utility Commands</b></summary>
+#### ⚡️ Utility Commands
 
 | Command | Description |
 |---------|-------------|
@@ -234,96 +171,25 @@ python Bot_Control_Computer.py
 | `/volume_virtual_system` | Control volume with virtual touchpad |
 | `/keyboard_emulator` | Control with virtual keyboard |
 
-</details>
-
 ---
 
 ## 🔧 Packaging as Executable
 
-You can package this bot into a standalone Windows executable using PyInstaller.
+You can package this bot into a standalone Windows executable using PyInstaller:
 
-### 1. Install PyInstaller
 ```bash
-pip install pyinstaller
+python -m PyInstaller --onefile --noconsole Bot_Control_Computer.py
 ```
-
-### 2. Create the executable
-```bash
-pyinstaller --onefile --icon=icon.ico Bot_Control_Computer.py
-```
-
-### 3. Advanced packaging (with hidden console)
-```bash
-pyinstaller --onefile --noconsole --icon=icon.ico Bot_Control_Computer.py
-```
-
-### 4. Package with dependencies
-Create a `bot-control.spec` file:
-
-```python
-# -*- mode: python ; coding: utf-8 -*-
-
-block_cipher = None
-
-a = Analysis(['Bot_Control_Computer.py'],
-             pathex=['.'],
-             binaries=[],
-             datas=[],
-             hiddenimports=['pyngrok.ngrok', 'pkg_resources.py2_warn', 'playwright.sync_api', 'playwright.async_api'],
-             hookspath=[],
-             runtime_hooks=[],
-             excludes=[],
-             win_no_prefer_redirects=False,
-             win_private_assemblies=False,
-             cipher=block_cipher,
-             noarchive=False)
-
-pyz = PYZ(a.pure, a.zipped_data,
-             cipher=block_cipher)
-
-exe = EXE(pyz,
-          a.scripts,
-          a.binaries,
-          a.zipfiles,
-          a.datas,
-          [],
-          name='Computer_Control_Bot',
-          debug=False,
-          bootloader_ignore_signals=False,
-          strip=False,
-          upx=True,
-          upx_exclude=[],
-          runtime_tmpdir=None,
-          console=False,
-          icon='icon.ico')
-```
-
-Then run:
-```bash
-pyinstaller bot-control.spec
-```
-
-### 5. Make sure to include .env file
-Place the `.env` file alongside the executable in the `dist` folder.
 
 ---
 
-## ⚠️ Important Notes
 
-- **Security Warning**: This bot gives extensive control over your computer. Only share access with trusted users.
-- **Windows Focus**: Some features (especially volume control) are Windows-specific.
-- **Administrator Rights**: Some operations require administrator privileges.
-- **Browser Selection**: The bot will automatically switch to an available browser if your preferred one is not found.
-- **File Size Limits**: Telegram has a 50MB file size limit for sending/receiving files.
-- **Ngrok Sessions**: Virtual touchpad/volume control sessions expire after approximately 2 hours.
-- **Error Handling**: The bot includes comprehensive error handling but may encounter issues with specific hardware configurations.
 
 ---
 
 ## 👨‍💻 Author & Contact
 
 <div align="center">
-  <img src="https://github.com/LePhiAnhDev/assets/raw/main/developer-avatar.png" alt="Le Phi Anh" width="150px" style="border-radius: 50%">
   <h3>Le Phi Anh</h3>
 </div>
 
