@@ -182,10 +182,6 @@ python -m PyInstaller --onefile --noconsole Bot_Control_Computer.py
 
 ---
 
-
-
----
-
 ## 👨‍💻 Author & Contact
 
 <div align="center">
