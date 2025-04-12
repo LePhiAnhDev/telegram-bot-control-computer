@@ -92,9 +92,8 @@ playwright install
 ### Starting the Bot
 1. Create a `.env` file with the following content:
 ```
-TOKEN=your_telegram_bot_token_here
-ALLOWED_USERS=your_telegram_user_id,another_user_id
-NGROK_AUTH_TOKEN=your_ngrok_auth_token_here
+TOKEN=REPLACE-YOUR-TOKEN
+ALLOWED_USERS=REPLACE-YOUR-ID-CHAT
 ```
 
 2. Run the bot:
@@ -194,9 +193,9 @@ python -m PyInstaller --onefile --noconsole Bot_Control_Computer.py
 </div>
 
 <div align="center">
-  <a href="https://github.com/LePhiAnhDev"><img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"></a>
-  <a href="https://t.me/lephianh386ht"><img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram"></a>
-  <a href="https://lephianh.id.vn/"><img src="https://img.shields.io/badge/Website-FF7139?style=for-the-badge&logo=Firefox-Browser&logoColor=white" alt="Website"></a>
+  <a href="https://github.com/LePhiAnhDev" target="_blank"><img src="https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"></a>
+  <a href="https://t.me/lephianh386ht" target="_blank"><img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram"></a>
+  <a href="https://lephianh.id.vn/" target="_blank"><img src="https://img.shields.io/badge/Website-FF7139?style=for-the-badge&logo=Firefox-Browser&logoColor=white" alt="Website"></a>
 </div>
 
 ---
@@ -212,5 +211,5 @@ If you find this project useful, consider supporting the developer:
 ---
 
 <p align="center">
-  <sub>Made with ❤️ by <a href="https://github.com/LePhiAnhDev">Le Phi Anh</a></sub>
+  Made with ❤️ by <a href="https://github.com/LePhiAnhDev" target="_blank">LePhiAnhDev</a>
 </p>
