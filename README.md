@@ -92,8 +92,9 @@ playwright install
 ### Starting the Bot
 1. Create a `.env` file with the following content:
 ```
-TOKEN=REPLACE-YOUR-TOKEN
-ALLOWED_USERS=REPLACE-YOUR-ID-CHAT
+TOKEN=your_telegram_bot_token_here
+ALLOWED_USERS=your_telegram_user_id,another_user_id
+NGROK_AUTH_TOKEN=your_ngrok_auth_token_here
 ```
 
 2. Run the bot:
