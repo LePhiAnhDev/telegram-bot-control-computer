@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Điều khiển Chuột</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --primary-gradient: linear-gradient(135deg, #c2e9fb 0%, #a1c4fd 100%);
+                --secondary-gradient: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+                --accent-color: #6a11cb;
+                --text-color: #4a4a6a;
+                --light-text: #7a7a9a;
+                --glass-bg: rgba(255, 255, 255, 0.25);
+                --glass-border: rgba(255, 255, 255, 0.18);
+                --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.05);
+                --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.08);
+                --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.12);
+                --radius-sm: 12px;
+                --radius-md: 20px;
+                --radius-lg: 30px;
+                --transition-fast: 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                --transition-medium: 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                --transition-slow: 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: 'Quicksand', sans-serif;
+                background: #f8f9ff;
+                color: var(--text-color);
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                overflow-x: hidden;
+                touch-action: none;
+                position: relative;
+            }
+
+            /* Background gradient animation */
+            body::before, body::after {
+                content: "";
+                position: fixed;
+                width: 300px;
+                height: 300px;
+                border-radius: 50%;
+                background: var(--secondary-gradient);
+                opacity: 0.5;
+                filter: blur(80px);
+                z-index: -1;
+                animation: floatBubble 20s infinite alternate ease-in-out;
+            }
+
+            body::before {
+                top: -100px;
+                left: -100px;
+                animation-delay: 0s;
+            }
+
+            body::after {
+                bottom: -100px;
+                right: -100px;
+                background: var(--primary-gradient);
+                animation-delay: -10s;
+            }
+
+            @keyframes floatBubble {
+                0% {
+                    transform: translate(0, 0) scale(1);
+                }
+                50% {
+                    transform: translate(50px, 50px) scale(1.2);
+                }
+                100% {
+                    transform: translate(10px, 30px) scale(1);
+                }
+            }
+
+            .app-container {
+                width: 100%;
+                max-width: 500px;
+                margin: 0 auto;
+                padding: 20px;
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+                z-index: 1;
+            }
+
+            header {
+                text-align: center;
+                margin-bottom: 20px;
+            }
+
+            h1 {
+                font-weight: 700;
+                font-size: clamp(1.5rem, 5vw, 2rem);
+                background: linear-gradient(to right, #6a11cb, #2575fc);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+                margin-bottom: 5px;
+                letter-spacing: -0.5px;
+            }
+
+            .subtitle {
+                font-weight: 400;
+                font-size: clamp(0.9rem, 3vw, 1rem);
+                color: var(--light-text);
+            }
+
+            #touchpad {
+                flex: 1;
+                background: var(--glass-bg);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border-radius: var(--radius-lg);
+                border: 1px solid var(--glass-border);
+                box-shadow: var(--shadow-lg);
+                position: relative;
+                overflow: hidden;
+                touch-action: none;
+                margin-bottom: 20px;
+                min-height: 250px;
+                transition: box-shadow var(--transition-medium);
+            }
+
+            #touchpad:active {
+                box-shadow: 0 4px 16px rgba(106, 17, 203, 0.2);
+            }
+
+            /* Ripple effect on touch */
+            .ripple {
+                position: absolute;
+                border-radius: 50%;
+                transform: scale(0);
+                background: rgba(255, 255, 255, 0.7);
+                pointer-events: none;
+                animation: ripple 0.6s linear;
+            }
+
+            @keyframes ripple {
+                to {
+                    transform: scale(4);
+                    opacity: 0;
+                }
+            }
+
+            .cursor-indicator {
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: linear-gradient(45deg, #6a11cb, #2575fc);
+                box-shadow: 0 0 15px rgba(106, 17, 203, 0.5);
+                transform: translate(-50%, -50%);
+                pointer-events: none;
+                opacity: 0;
+                z-index: 10;
+                transition: transform 0.1s ease, opacity 0.2s ease;
+            }
+
+            .cursor-indicator::after {
+                content: '';
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                border-radius: 50%;
+                background: rgba(106, 17, 203, 0.3);
+                z-index: -1;
+                animation: pulse 1.5s infinite;
+            }
+
+            @keyframes pulse {
+                0% {
+                    transform: scale(1);
+                    opacity: 1;
+                }
+                100% {
+                    transform: scale(3);
+                    opacity: 0;
+                }
+            }
+
+            .controls-container {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .button-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+            }
+
+            .action-button {
+                background: var(--glass-bg);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid var(--glass-border);
+                border-radius: var(--radius-sm);
+                padding: 15px 5px;
+                font-family: 'Quicksand', sans-serif;
+                font-weight: 600;
+                font-size: 0.9rem;
+                color: var(--text-color);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: all var(--transition-fast);
+                box-shadow: var(--shadow-sm);
+                position: relative;
+                overflow: hidden;
+            }
+
+            .action-button:active {
+                transform: translateY(2px);
+                box-shadow: 0 2px 8px rgba(106, 17, 203, 0.15);
+            }
+
+            .action-button.active {
+                background: linear-gradient(45deg, rgba(106, 17, 203, 0.15), rgba(37, 117, 252, 0.15));
+                border-color: rgba(106, 17, 203, 0.2);
+                color: var(--accent-color);
+            }
+
+            .action-button .icon {
+                margin-right: 5px;
+                font-size: 1.1rem;
+            }
+
+            .sensitivity-container {
+                background: var(--glass-bg);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid var(--glass-border);
+                border-radius: var(--radius-sm);
+                padding: 15px;
+                box-shadow: var(--shadow-sm);
+            }
+
+            .sensitivity-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+            }
+
+            .sensitivity-label {
+                font-weight: 600;
+                font-size: 0.9rem;
+            }
+
+            .sensitivity-value {
+                font-weight: 700;
+                font-size: 0.9rem;
+                color: var(--accent-color);
+                background: rgba(106, 17, 203, 0.1);
+                padding: 3px 8px;
+                border-radius: 12px;
+            }
+
+            .sensitivity-slider {
+                width: 100%;
+                -webkit-appearance: none;
+                appearance: none;
+                height: 6px;
+                background: linear-gradient(to right, #c2e9fb, #a1c4fd);
+                border-radius: 10px;
+                outline: none;
+                margin: 10px 0;
+            }
+
+            .sensitivity-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: linear-gradient(45deg, #6a11cb, #2575fc);
+                cursor: pointer;
+                box-shadow: 0 0 5px rgba(106, 17, 203, 0.5);
+                border: 2px solid white;
+                transition: all 0.2s ease;
+            }
+
+            .sensitivity-slider::-webkit-slider-thumb:active {
+                transform: scale(1.2);
+            }
+
+            .status-container {
+                text-align: center;
+                margin-top: 10px;
+                font-size: 0.85rem;
+                font-weight: 500;
+                color: var(--light-text);
+                height: 20px;
+                transition: all var(--transition-medium);
+            }
+
+            /* Animation for status update */
+            .status-update {
+                animation: statusPop 0.5s ease;
+            }
+
+            @keyframes statusPop {
+                0% {
+                    transform: scale(0.8);
+                    opacity: 0;
+                }
+                50% {
+                    transform: scale(1.1);
+                }
+                100% {
+                    transform: scale(1);
+                    opacity: 1;
+                }
+            }
+
+            /* Touch guides */
+            .touch-guides {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                opacity: 0.7;
+                transition: opacity 0.3s ease;
+                pointer-events: none;
+            }
+
+            .touch-guides svg {
+                width: 80px;
+                height: 80px;
+                margin-bottom: 15px;
+                fill: rgba(106, 17, 203, 0.2);
+            }
+
+            .touch-guide-text {
+                font-size: 0.9rem;
+                font-weight: 500;
+                color: rgba(106, 17, 203, 0.5);
+                text-align: center;
+                max-width: 80%;
+            }
+
+            #touchpad:active .touch-guides {
+                opacity: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="app-container">
+            <header>
+                <h1>Điều khiển chuột</h1>
+                <p class="subtitle">Control with elegance</p>
+            </header>
+
+            <div id="touchpad">
+                <div class="cursor-indicator" id="cursor"></div>
+                <div class="touch-guides">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M9,11.24V7.5C9,6.12 10.12,5 11.5,5S14,6.12 14,7.5v3.74c1.21-0.81 2-2.18 2-3.74C16,5.01 13.99,3 11.5,3S7,5.01 7,7.5C7,9.06 7.79,10.43 9,11.24z M13,7.5V10.32l-1.5-0.79V7.5C11.5,6.67 12.17,6 13,6S14.5,6.67 14.5,7.5c0,0.88-0.33,1.69-0.89,2.3C13.58,9.8 13.5,9.66 13.5,9.5v-2H13z"/>
+                        <path d="M11.5,13.5c-0.5,0-0.9,0.4-0.9,0.9v5.67l-1.07,1.77c-0.42,0.71,0.03,1.65,0.89,1.65h0.01c0.31,0 0.6-0.15 0.78-0.4l2.15-3.5C14.21,19 15,17.21 15,15.5c0-1.93-1.57-3.5-3.5-3.5V13.5z"/>
+                    </svg>
+                    <p class="touch-guide-text">Touch and drag to move cursor</p>
+                </div>
+            </div>
+
+            <div class="controls-container">
+                <div class="button-grid">
+                    <button id="leftClick" class="action-button">
+                        <span class="icon">👆</span> Left Click
+                    </button>
+                    <button id="rightClick" class="action-button">
+                        <span class="icon">✌️</span> Right Click
+                    </button>
+                    <button id="doubleClick" class="action-button">
+                        <span class="icon">👆👆</span> Double Click
+                    </button>
+                    <button id="scrollMode" class="action-button">
+                        <span class="icon">↕️</span> Scroll Mode
+                    </button>
+                </div>
+
+                <div class="sensitivity-container">
+                    <div class="sensitivity-header">
+                        <span class="sensitivity-label">Sensitivity</span>
+                        <span class="sensitivity-value" id="sensitivityValue">1.5</span>
+                    </div>
+                    <input type="range" id="sensitivity" class="sensitivity-slider" min="0.5" max="3.0" step="0.1" value="1.5">
+                </div>
+            </div>
+
+            <div class="status-container" id="status">Ready to control</div>
+        </div>
+
+        <script>
+            const touchpad = document.getElementById('touchpad');
+            const cursor = document.getElementById('cursor');
+            const leftClickBtn = document.getElementById('leftClick');
+            const rightClickBtn = document.getElementById('rightClick');
+            const doubleClickBtn = document.getElementById('doubleClick');
+            const scrollModeBtn = document.getElementById('scrollMode');
+            const statusElem = document.getElementById('status');
+            const sensitivitySlider = document.getElementById('sensitivity');
+            const sensitivityValue = document.getElementById('sensitivityValue');
+            
+            let lastX = 0;
+            let lastY = 0;
+            let isTracking = false;
+            let isScrollMode = false;
+            let sensitivity = parseFloat(sensitivitySlider.value);
+            
+            // Update sensitivity value display
+            sensitivitySlider.addEventListener('input', () => {
+                sensitivity = parseFloat(sensitivitySlider.value);
+                sensitivityValue.textContent = sensitivity.toFixed(1);
+                updateStatus(`Sensitivity set to ${sensitivity.toFixed(1)}`);
+            });
+            
+            // Toggle scroll mode
+            scrollModeBtn.addEventListener('click', () => {
+                isScrollMode = !isScrollMode;
+                if (isScrollMode) {
+                    scrollModeBtn.classList.add('active');
+                    scrollModeBtn.innerHTML = `<span class="icon">↕️</span> Scroll: ON`;
+                    updateStatus('Scroll Mode: Active');
+                } else {
+                    scrollModeBtn.classList.remove('active');
+                    scrollModeBtn.innerHTML = `<span class="icon">↕️</span> Scroll Mode`;
+                    updateStatus('Cursor Mode: Active');
+                }
+                // Add button press effect
+                addButtonPressEffect(scrollModeBtn);
+            });
+            
+            // Create ripple effect
+            function createRipple(event, element) {
+                const ripple = document.createElement('span');
+                const rect = element.getBoundingClientRect();
+                
+                const size = Math.max(rect.width, rect.height);
+                const x = event.clientX - rect.left - size / 2;
+                const y = event.clientY - rect.top - size / 2;
+                
+                ripple.style.width = ripple.style.height = `${size}px`;
+                ripple.style.left = `${x}px`;
+                ripple.style.top = `${y}px`;
+                ripple.classList.add('ripple');
+                
+                element.appendChild(ripple);
+                
+                setTimeout(() => {
+                    ripple.remove();
+                }, 600);
+            }
+            
+            // Create touch ripple effect
+            function createTouchRipple(event, element) {
+                const touch = event.touches[0];
+                const ripple = document.createElement('span');
+                const rect = element.getBoundingClientRect();
+                
+                const size = Math.max(rect.width, rect.height);
+                const x = touch.clientX - rect.left - size / 2;
+                const y = touch.clientY - rect.top - size / 2;
+                
+                ripple.style.width = ripple.style.height = `${size}px`;
+                ripple.style.left = `${x}px`;
+                ripple.style.top = `${y}px`;
+                ripple.classList.add('ripple');
+                
+                element.appendChild(ripple);
+                
+                setTimeout(() => {
+                    ripple.remove();
+                }, 600);
+            }
+            
+            // Add button press effect
+            function addButtonPressEffect(button) {
+                button.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    button.style.transform = '';
+                }, 150);
+            }
+            
+            // Update status with animation
+            function updateStatus(message) {
+                statusElem.textContent = '';
+                setTimeout(() => {
+                    statusElem.textContent = message;
+                    statusElem.classList.add('status-update');
+                    setTimeout(() => {
+                        statusElem.classList.remove('status-update');
+                    }, 500);
+                }, 10);
+            }
+            
+            // Handle touch events for mobile
+            touchpad.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isTracking = true;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+                
+                // Show cursor indicator with animation
+                cursor.style.opacity = '1';
+                cursor.style.left = `${lastX}px`;
+                cursor.style.top = `${lastY}px`;
+                
+                // Create ripple effect
+                createTouchRipple(e, touchpad);
+            });
+            
+            touchpad.addEventListener('touchmove', (e) => {
+                if (!isTracking) return;
+                e.preventDefault();
+                
+                const touchX = e.touches[0].clientX;
+                const touchY = e.touches[0].clientY;
+                
+                // Update cursor indicator position
+                cursor.style.left = `${touchX}px`;
+                cursor.style.top = `${touchY}px`;
+                
+                const dx = (touchX - lastX) * sensitivity;
+                const dy = (touchY - lastY) * sensitivity;
+                
+                if (isScrollMode) {
+                    // In scroll mode, only use vertical movement for scrolling
+                    sendScroll(dy);
+                    updateStatus(`Scrolling: ${dy > 0 ? 'Down' : 'Up'}`);
+                } else {
+                    // Normal mouse movement
+                    sendMovement(dx, dy);
+                    updateStatus('Moving cursor');
+                }
+                
+                lastX = touchX;
+                lastY = touchY;
+            });
+            
+            touchpad.addEventListener('touchend', () => {
+                isTracking = false;
+                // Hide cursor with fade out
+                cursor.style.opacity = '0';
+                updateStatus(isScrollMode ? 'Scroll Mode: Ready' : 'Cursor Mode: Ready');
+            });
+            
+            // Handle mouse events for desktop
+            touchpad.addEventListener('mousedown', (e) => {
+                isTracking = true;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                
+                // Show cursor indicator
+                cursor.style.opacity = '1';
+                cursor.style.left = `${lastX}px`;
+                cursor.style.top = `${lastY}px`;
+                
+                // Create ripple effect
+                createRipple(e, touchpad);
+            });
+            
+            touchpad.addEventListener('mousemove', (e) => {
+                if (!isTracking) return;
+                
+                // Update cursor indicator position
+                cursor.style.left = `${e.clientX}px`;
+                cursor.style.top = `${e.clientY}px`;
+                
+                const dx = (e.clientX - lastX) * sensitivity;
+                const dy = (e.clientY - lastY) * sensitivity;
+                
+                if (isScrollMode) {
+                    // In scroll mode, only use vertical movement for scrolling
+                    sendScroll(dy);
+                    updateStatus(`Scrolling: ${dy > 0 ? 'Down' : 'Up'}`);
+                } else {
+                    // Normal mouse movement
+                    sendMovement(dx, dy);
+                    updateStatus('Moving cursor');
+                }
+                
+                lastX = e.clientX;
+                lastY = e.clientY;
+            });
+            
+            touchpad.addEventListener('mouseup', () => {
+                isTracking = false;
+                // Hide cursor with fade out
+                cursor.style.opacity = '0';
+                updateStatus(isScrollMode ? 'Scroll Mode: Ready' : 'Cursor Mode: Ready');
+            });
+            
+            // Button clicks with effects
+            leftClickBtn.addEventListener('click', () => {
+                sendClick('left');
+                updateStatus('Left click sent');
+                addButtonPressEffect(leftClickBtn);
+            });
+            
+            rightClickBtn.addEventListener('click', () => {
+                sendClick('right');
+                updateStatus('Right click sent');
+                addButtonPressEffect(rightClickBtn);
+            });
+            
+            doubleClickBtn.addEventListener('click', () => {
+                sendDoubleClick();
+                updateStatus('Double click sent');
+                addButtonPressEffect(doubleClickBtn);
+            });
+            
+            // Send movement to server
+            function sendMovement(dx, dy) {
+                fetch('/move', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ dx, dy })
+                }).catch(error => {
+                    console.error('Error sending movement:', error);
+                    updateStatus('Connection error');
+                });
+            }
+            
+            // Send scroll to server
+            function sendScroll(amount) {
+                fetch('/scroll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ amount })
+                }).catch(error => {
+                    console.error('Error sending scroll:', error);
+                    updateStatus('Connection error');
+                });
+            }
+            
+            // Send click to server
+            function sendClick(button) {
+                fetch('/click', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ button })
+                }).catch(error => {
+                    console.error('Error sending click:', error);
+                    updateStatus('Connection error');
+                });
+            }
+            
+            // Send double click to server
+            function sendDoubleClick() {
+                fetch('/doubleclick', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ button: 'left' })
+                }).catch(error => {
+                    console.error('Error sending double click:', error);
+                    updateStatus('Connection error');
+                });
+            }
+            
+            // Initialize
+            window.addEventListener('load', () => {
+                updateStatus('Ready to control');
+            });
+        </script>
+    </body>
+    </html>
