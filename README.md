@@ -4,6 +4,13 @@
   <img src="https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask">
   <img src="https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white" alt="OpenCV">
   <img src="https://img.shields.io/badge/Ngrok-1F1E37?style=for-the-badge&logo=ngrok&logoColor=white" alt="Ngrok">
+  <img src="https://img.shields.io/badge/PyAutoGUI-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="PyAutoGUI">
+  <img src="https://img.shields.io/badge/NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white" alt="NumPy">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Asyncio-306998?style=for-the-badge&logo=python&logoColor=white" alt="Asyncio">
+  <img src="https://img.shields.io/badge/Pynput-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Pynput">
+  <img src="https://img.shields.io/badge/PyCAW-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="PyCAW">
+  <img src="https://img.shields.io/badge/dotenv-ECD53F?style=for-the-badge&logo=dotenv&logoColor=black" alt="dotenv">
 </div>
 
 <h1 align="center">🤖 Advanced Computer Control Telegram Bot 🖥️</h1>
