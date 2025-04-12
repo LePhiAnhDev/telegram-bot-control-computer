@@ -47,9 +47,7 @@ except Exception as e:
 # Áp dụng nest_asyncio để tránh xung đột event loop
 nest_asyncio.apply()
 
-###########################################
 # THIẾT LẬP CHUNG VÀ CẤU HÌNH
-###########################################
 
 # Tải biến môi trường từ file .env
 load_dotenv()
@@ -137,13 +135,15 @@ except Exception as e:
 # Port cho Flask server
 FLASK_PORT = 5500
 
-# Các biến cho Ngrok
+# Các biến cho Ngrok và quản lý touchpad
 ngrok_tunnel = None
 ngrok_auth_token = os.getenv('NGROK_AUTH_TOKEN')  # Lấy từ biến môi trường
+flask_server_thread = None
+current_touchpad_type = None  # 'mouse' hoặc 'volume' hoặc None
+active_touchpad_chat_id = None  # Chat ID của người đang sử dụng touchpad
+touchpad_active = False  # Trạng thái kích hoạt của touchpad
 
-###########################################
 # KIỂM TRA QUYỀN NGƯỜI DÙNG
-###########################################
 
 async def check_user_permission(update: Update) -> bool:
     """Kiểm tra xem người dùng có được phép sử dụng bot hay không"""
@@ -169,9 +169,54 @@ async def check_user_permission(update: Update) -> bool:
     
     return False
 
-###########################################
 # CẤU HÌNH FLASK VÀ NGROK CHO TOUCHPAD ẢO
-###########################################
+
+# Hàm quản lý touchpad hiện tại
+async def stop_current_touchpad(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None):
+    """Dừng touchpad hiện tại đang chạy nếu có"""
+    global current_touchpad_type, ngrok_tunnel, flask_server_thread, active_touchpad_chat_id, touchpad_active
+    
+    # Nếu không có touchpad nào đang chạy
+    if current_touchpad_type is None or not touchpad_active:
+        return True, "Không có touchpad nào đang chạy"
+    
+    try:
+        # Lưu loại touchpad đang chạy để thông báo
+        current_type = current_touchpad_type
+        
+        # Dừng Ngrok
+        if ngrok_tunnel:
+            try:
+                stop_ngrok()
+            except Exception as e:
+                logger.error(f"Lỗi khi dừng Ngrok: {e}")
+        
+        # Ghi log và thông báo cho người dùng
+        logger.info(f"Đã dừng touchpad {current_type}")
+        
+        # Nếu có update và context, gửi thông báo cho người dùng
+        if update and context and active_touchpad_chat_id:
+            # Nếu người gọi lệnh dừng khác với người đang sử dụng
+            if update.effective_chat.id != active_touchpad_chat_id:
+                # Thông báo cho người đang sử dụng touchpad
+                try:
+                    await context.bot.send_message(
+                        chat_id=active_touchpad_chat_id,
+                        text=f"<b>⚠️ Touchpad {current_type} của bạn đã bị dừng bởi người dùng khác.</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.error(f"Lỗi khi gửi thông báo dừng touchpad: {e}")
+        
+        # Reset các biến toàn cục
+        current_touchpad_type = None
+        active_touchpad_chat_id = None
+        touchpad_active = False
+        
+        return True, f"{current_type} touchpad"
+    except Exception as e:
+        logger.error(f"Lỗi khi dừng touchpad: {e}")
+        return False, f"Lỗi khi dừng touchpad: {str(e)}"
 
 # Kiểm tra khả năng sử dụng Flask và Ngrok
 if FLASK_NGROK_AVAILABLE:
@@ -959,7 +1004,7 @@ if FLASK_NGROK_AVAILABLE:
         except Exception as e:
             logger.error(f"Lỗi khi double click chuột: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
-
+        
     # Khởi tạo Flask server
     def start_flask_server():
         """Khởi động Flask server với xử lý COM riêng cho từng thread"""
@@ -988,6 +1033,9 @@ if FLASK_NGROK_AVAILABLE:
             if ngrok_auth_token:
                 conf.get_default().auth_token = ngrok_auth_token
             
+            # Dừng bất kỳ tunnel nào đang chạy trước khi tạo mới
+            stop_ngrok()
+            
             # Kết nối Ngrok đến port của Flask
             ngrok_tunnel = ngrok.connect(FLASK_PORT)
             logger.info(f"Ngrok URL: {ngrok_tunnel.public_url}")
@@ -1000,914 +1048,25 @@ if FLASK_NGROK_AVAILABLE:
     def stop_ngrok():
         global ngrok_tunnel
         try:
+            # Kiểm tra xem có tunnel nào đang mở không
+            tunnels = ngrok.get_tunnels()
+            if tunnels:
+                for tunnel in tunnels:
+                    try:
+                        ngrok.disconnect(tunnel.public_url)
+                        logger.info(f"Đã đóng Ngrok tunnel: {tunnel.public_url}")
+                    except Exception as e:
+                        logger.error(f"Lỗi khi đóng Ngrok tunnel {tunnel.public_url}: {e}")
+            
             if ngrok_tunnel:
-                ngrok.disconnect(ngrok_tunnel.public_url)
+                try:
+                    ngrok.disconnect(ngrok_tunnel.public_url)
+                    logger.info(f"Đã đóng Ngrok tunnel chính: {ngrok_tunnel.public_url}")
+                except Exception as e:
+                    logger.error(f"Lỗi khi đóng Ngrok tunnel chính: {e}")
                 ngrok_tunnel = None
         except Exception as e:
             logger.error(f"Lỗi khi dừng Ngrok: {e}")
-
-###########################################
-# ĐỊNH NGHĨA LỆNH VÀ NHÓM LỆNH
-###########################################
-
-# Định nghĩa các nhóm lệnh để hiển thị trong menu
-COMMAND_GROUPS = {
-    "intro": {
-        "title": "⚡️ GIỚI THIỆU",
-        "commands": {
-            "/introduce": "Giới thiệu về tôi."
-        }
-    },
-    "system": {
-        "title": "⚡️ ĐIỀU KHIỂN HỆ THỐNG",
-        "commands": {
-            "/shutdown": "Lệnh tắt máy.",
-            "/sleep": "Lệnh vào chế độ ngủ.",
-            "/restart": "Lệnh khởi động máy.",
-            "/cancel": "Huỷ toàn bộ các lệnh."
-        }
-    },
-    "image": {
-        "title": "⚡️ LỆNH HÌNH ẢNH",
-        "commands": {
-            "/screen_shot": "Chụp ảnh màn hình và gửi về máy.",
-            "/record_video": "Quay video màn hình và gửi về máy."
-        }
-    },
-    "file": {
-        "title": "⚡️ QUẢN LÝ FILE",
-        "commands": {
-            "/upload_file": "Người dùng gửi file để tải lên máy.",
-            "/download_file": "Người dùng nhập đường dẫn để tải về.",
-            "/deletefile": "Người dùng nhập đường dẫn để xoá file."
-        }
-    },
-    "info": {
-        "title": "⚡️ THÔNG TIN HỆ THỐNG",
-        "commands": {
-            "/tasklist": "Danh sách các tiến trình đang chạy.",
-            "/systeminfo": "Thông tin hệ thống.",
-            "/netuser": "Danh sách người dùng trên máy tính.",
-            "/whoami": "Tên tài khoản đang đăng nhập.",
-            "/hostname": "Hiển thị tên máy tính."
-        }
-    },
-    "network": {
-        "title": "⚡️ MẠNG",
-        "commands": {
-            "/ipconfig": "Thông tin cấu hình mạng.",
-            "/release": "Giải phóng địa chỉ IP hiện tại.",
-            "/renew": "Gia hạn địa chỉ IP mới."
-        }
-    },
-    "browser": {
-        "title": "⚡️ TRÌNH DUYỆT",
-        "commands": {
-            "/playvideo": "Phát video YouTube từ link.",
-            "/openweb": "Mở các trang web.",
-            "/setbrowser": "Chọn trình duyệt mặc định (chrome, brave, edge, opera)."
-        }
-    },
-    "utility": {
-        "title": "⚡️ TIỆN ÍCH",
-        "commands": {
-            "/mouse_virtual_system": "Điều khiển chuột với touchpad ảo.",
-            "/volume_virtual_system": "Điều khiển âm lượng với touchpad ảo.",
-            "/keyboard_emulator": "Điều khiển bàn phím ảo."
-        }
-    },
-    "help": {
-        "title": "⚡️ TRỢ GIÚP",
-        "commands": {
-            "/menu": "Hiển thị danh sách các lệnh."
-        }
-    }
-}
-
-# Tạo từ điển COMMANDS từ các nhóm lệnh để sử dụng
-COMMANDS = {}
-for group in COMMAND_GROUPS.values():
-    COMMANDS.update(group["commands"])
-
-###########################################
-# QUẢN LÝ TRÌNH DUYỆT (PLAYWRIGHT)
-###########################################
-
-# Khởi tạo Playwright và mở trình duyệt
-async def initialize_browser():
-    """Khởi tạo trình duyệt sử dụng Playwright"""
-    global playwright, browser, page, current_browser_type
-
-    try:
-        # Đóng browser hiện tại nếu đang mở
-        await close_browser()
-        
-        # Khởi tạo Playwright
-        playwright = await async_playwright().start()
-        
-        # Chọn trình duyệt dựa trên current_browser_type
-        browser_paths = BROWSER_PATHS
-        user_data_paths = USER_DATA_DIRS
-        
-        # Kiểm tra xem trình duyệt hiện tại có tồn tại không
-        if current_browser_type not in browser_paths or not os.path.exists(browser_paths[current_browser_type]):
-            # Tìm trình duyệt thay thế
-            available_browsers = [b for b in browser_paths if os.path.exists(browser_paths[b])]
-            if not available_browsers:
-                return False, "Không tìm thấy trình duyệt nào được cài đặt trên hệ thống."
-            
-            current_browser_type = available_browsers[0]
-            logger.info(f"Đã chuyển sang trình duyệt thay thế: {current_browser_type}")
-        
-        # Edge có xử lý đặc biệt
-        if current_browser_type == "edge":
-            try:
-                # Sử dụng playwright.chromium với channel="msedge"
-                logger.info("Đang khởi động Microsoft Edge...")
-                
-                # Phương pháp 1: Sử dụng chế độ incognito (không dùng user data)
-                browser = await playwright.chromium.launch(
-                    channel="msedge",
-                    headless=False,
-                    args=["--no-sandbox"]
-                )
-                
-                # Mở một context mới (tương đương incognito)
-                browser_context = await browser.new_context()
-                
-                # Tạo trang mới
-                page = await browser_context.new_page()
-                return True, "Khởi tạo trình duyệt Edge thành công (chế độ ẩn danh)"
-                
-            except Exception as edge_error:
-                # Phương pháp 2: Thử với browser mặc định nếu Edge thất bại
-                error_msg = str(edge_error)
-                logger.error(f"Lỗi khi khởi động Edge: {error_msg}")
-                
-                # Tự động chuyển sang Brave hoặc Chrome nếu Edge không hoạt động
-                # Thử Brave trước
-                if "brave" in browser_paths and os.path.exists(browser_paths["brave"]):
-                    current_browser_type = "brave"
-                # Nếu không có Brave, thử Chrome
-                elif "chrome" in browser_paths and os.path.exists(browser_paths["chrome"]):
-                    current_browser_type = "chrome"
-                else:
-                    # Nếu không có cả Brave và Chrome, trả về lỗi
-                    return False, f"Microsoft Edge gặp lỗi và không tìm thấy trình duyệt thay thế: {error_msg}"
-                
-                # Thông báo lỗi và biện pháp khắc phục đã thực hiện
-                error_info = (
-                    f"Microsoft Edge gặp lỗi: {error_msg.replace('<', '&lt;').replace('>', '&gt;')}\n\n"
-                    f"Bot sẽ tự động chuyển sang trình duyệt {current_browser_type.capitalize()}.\n\n"
-                    f"Gợi ý: Để Edge hoạt động, thử chạy bot với quyền admin hoặc đóng tất cả cửa sổ Edge đang mở trước."
-                )
-                
-                # Tiếp tục với trình duyệt thay thế
-                browser_type = playwright.chromium
-                executable_path = browser_paths[current_browser_type]
-                user_data_dir = user_data_paths[current_browser_type]
-                
-                if not os.path.exists(executable_path):
-                    return False, f"Không tìm thấy trình duyệt {current_browser_type.capitalize()} tại: {executable_path}"
-                
-                if not os.path.exists(user_data_dir):
-                    # Nếu không tìm thấy thư mục dữ liệu, tạo mới
-                    try:
-                        os.makedirs(user_data_dir, exist_ok=True)
-                    except:
-                        return False, f"Không thể tạo thư mục dữ liệu người dùng: {user_data_dir}"
-                
-                try:
-                    browser = await browser_type.launch_persistent_context(
-                        user_data_dir,
-                        executable_path=executable_path,
-                        headless=False
-                    )
-                    
-                    # Tạo trang mới
-                    page = await browser.new_page()
-                    return True, f"Edge gặp lỗi. Đã tự động chuyển sang {current_browser_type.capitalize()}. {error_info}"
-                except Exception as browser_error:
-                    return False, f"Không thể khởi động trình duyệt {current_browser_type.capitalize()} dự phòng: {str(browser_error)}"
-        
-        # Xử lý các trình duyệt khác
-        else:
-            browser_type = playwright.chromium
-            executable_path = browser_paths[current_browser_type]
-            
-            # Kiểm tra đường dẫn user data
-            user_data_dir = user_data_paths[current_browser_type]
-            if not os.path.exists(user_data_dir):
-                # Nếu không tìm thấy thư mục dữ liệu, tạo mới
-                try:
-                    os.makedirs(user_data_dir, exist_ok=True)
-                except:
-                    return False, f"Không thể tạo thư mục dữ liệu người dùng: {user_data_dir}"
-            
-            # Khởi tạo trình duyệt
-            try:
-                browser = await browser_type.launch_persistent_context(
-                    user_data_dir,
-                    executable_path=executable_path,
-                    headless=False
-                )
-                
-                # Tạo trang mới
-                page = await browser.new_page()
-                return True, f"Khởi tạo trình duyệt {current_browser_type.capitalize()} thành công"
-            except Exception as e:
-                return False, f"Không thể khởi động trình duyệt {current_browser_type.capitalize()}: {str(e)}"
-    except Exception as e:
-        # Xử lý thông báo lỗi an toàn cho HTML
-        error_msg = str(e)
-        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
-        return False, f"Lỗi khi khởi tạo trình duyệt: {safe_error}"
-
-# Đóng browser
-async def close_browser():
-    """Đóng trình duyệt và giải phóng tài nguyên"""
-    global browser, page, playwright
-    
-    try:
-        if page:
-            await page.close()
-            page = None
-        
-        if browser:
-            await browser.close()
-            browser = None
-        
-        if playwright:
-            await playwright.stop()
-            playwright = None
-            
-        return True, "Đã đóng trình duyệt"
-    except Exception as e:
-        return False, f"Lỗi khi đóng trình duyệt: {str(e)}"
-
-# Lệnh chọn trình duyệt mặc định
-async def set_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Chọn trình duyệt mặc định"""
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-        
-    global current_browser_type
-
-    if not context.args:
-        # Tạo danh sách trình duyệt có sẵn
-        available_browsers = {}
-        for browser_name, browser_path in BROWSER_PATHS.items():
-            if os.path.exists(browser_path):
-                available_browsers[browser_name] = browser_path
-        
-        # Nếu không có trình duyệt nào
-        if not available_browsers:
-            await update.message.reply_text(
-                "<b>❌ Không tìm thấy trình duyệt nào được cài đặt trên hệ thống.</b>",
-                parse_mode="HTML"
-            )
-            return
-        
-        # Tạo các nút cho trình duyệt có sẵn
-        keyboard = []
-        browser_row = []
-        
-        for i, browser_name in enumerate(available_browsers.keys()):
-            browser_row.append(InlineKeyboardButton(
-                browser_name.capitalize(), 
-                callback_data=f"browser_{browser_name}"
-            ))
-            
-            # Mỗi hàng chứa 2 nút
-            if len(browser_row) == 2 or i == len(available_browsers) - 1:
-                keyboard.append(browser_row)
-                browser_row = []
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"<b>Trình duyệt hiện tại:</b> {current_browser_type.capitalize()}\n"
-            "<b>Vui lòng chọn trình duyệt mặc định:</b>\n\n"
-            "<i>Lưu ý: Microsoft Edge có thể gặp vấn đề và sẽ tự động chuyển sang trình duyệt khác nếu gặp lỗi. "
-            "Nếu muốn dùng Edge, hãy chạy bot với quyền Admin và đóng tất cả cửa sổ Edge đang mở trước.</i>",
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-        return
-
-    browser_choice = context.args[0].lower()
-    
-    # Kiểm tra xem trình duyệt có tồn tại không
-    if browser_choice in BROWSER_PATHS and os.path.exists(BROWSER_PATHS[browser_choice]):
-        current_browser_type = browser_choice
-        
-        message = f"<b>✅ Đã đặt {browser_choice.capitalize()} làm trình duyệt mặc định.</b>"
-        if browser_choice == "edge":
-            message += "\n\n<i>Lưu ý: Microsoft Edge có thể gặp vấn đề. Nếu gặp lỗi, bot sẽ tự động chuyển sang trình duyệt khác. "
-            message += "Để tăng khả năng thành công, hãy chạy bot với quyền Admin và đóng các cửa sổ Edge đang mở.</i>"
-            
-        await update.message.reply_text(
-            message,
-            parse_mode="HTML"
-        )
-    else:
-        # Kiểm tra xem trình duyệt có trong danh sách nhưng không tồn tại
-        if browser_choice in BROWSER_PATHS:
-            await update.message.reply_text(
-                f"<b>❌ Không tìm thấy trình duyệt {browser_choice.capitalize()} tại: {BROWSER_PATHS[browser_choice]}</b>",
-                parse_mode="HTML"
-            )
-        else:
-            await update.message.reply_text(
-                "<b>❌ Trình duyệt không hợp lệ. Vui lòng chọn Chrome, Brave, Edge hoặc Opera.</b>",
-                parse_mode="HTML"
-            )
-
-# Xử lý callback chọn trình duyệt
-async def handle_browser_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý khi người dùng chọn trình duyệt từ inline button"""
-    global current_browser_type
-    
-    query = update.callback_query
-    await query.answer()
-    
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-    
-    if not query.data.startswith("browser_"):
-        return
-        
-    browser_choice = query.data.split("_")[1]
-    
-    # Kiểm tra xem trình duyệt có tồn tại không
-    if browser_choice in BROWSER_PATHS and os.path.exists(BROWSER_PATHS[browser_choice]):
-        current_browser_type = browser_choice
-        
-        message = f"<b>✅ Đã đặt {browser_choice.capitalize()} làm trình duyệt mặc định.</b>"
-        if browser_choice == "edge":
-            message += "\n\n<i>Lưu ý: Microsoft Edge có thể gặp vấn đề. Nếu gặp lỗi, bot sẽ tự động chuyển sang trình duyệt khác. "
-            message += "Để tăng khả năng thành công, hãy chạy bot với quyền Admin và đóng các cửa sổ Edge đang mở.</i>"
-            
-        await query.edit_message_text(
-            message,
-            parse_mode="HTML"
-        )
-    else:
-        # Kiểm tra xem trình duyệt có trong danh sách nhưng không tồn tại
-        if browser_choice in BROWSER_PATHS:
-            await query.edit_message_text(
-                f"<b>❌ Không tìm thấy trình duyệt {browser_choice.capitalize()} tại: {BROWSER_PATHS[browser_choice]}</b>",
-                parse_mode="HTML"
-            )
-        else:
-            await query.edit_message_text(
-                "<b>❌ Trình duyệt không hợp lệ. Vui lòng chọn Chrome, Brave, Edge hoặc Opera.</b>",
-                parse_mode="HTML"
-            )
-
-###########################################
-# ĐIỀU KHIỂN TRÌNH DUYỆT
-###########################################
-
-# Tính năng phát video
-async def play_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mở video YouTube và hiển thị các điều khiển"""
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-        
-    global page
-    
-    # Lấy link từ tham số hoặc tin nhắn
-    if context.args:
-        youtube_url = context.args[0]
-    else:
-        youtube_url = update.message.text.strip()
-        if youtube_url.startswith("/playvideo "):
-            youtube_url = youtube_url[11:].strip()
-        else:
-            await update.message.reply_text(
-                "<b>⚠️ Hãy gửi một link YouTube kèm lệnh /playvideo [link].</b>",
-                parse_mode="HTML"
-            )
-            return
-    
-    # Kiểm tra link YouTube hợp lệ
-    youtube_pattern = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+" 
-    if not re.match(youtube_pattern, youtube_url):
-        await update.message.reply_text(
-            "<b>❌ Link YouTube không hợp lệ. Vui lòng kiểm tra lại.</b>",
-            parse_mode="HTML"
-        )
-        return
-    
-    try:
-        # Kiểm tra nếu trình duyệt đã khởi tạo chưa
-        if not browser or not page:
-            init_message = await update.message.reply_text(
-                f"<b>🔄 Đang khởi động trình duyệt {current_browser_type.capitalize()}...</b>",
-                parse_mode="HTML"
-            )
-            success, message = await initialize_browser()
-            if not success:
-                # Đảm bảo thông báo lỗi an toàn cho HTML
-                safe_message = message.replace("<", "&lt;").replace(">", "&gt;")
-                await init_message.edit_text(
-                    f"<b>❌ Không thể khởi động trình duyệt:</b> {safe_message}",
-                    parse_mode="HTML"
-                )
-                return
-            else:
-                await init_message.edit_text(
-                    f"<b>✅ Đã khởi động trình duyệt {current_browser_type.capitalize()} thành công.</b>",
-                    parse_mode="HTML"
-                )
-        
-        # Điều hướng đến trang YouTube
-        loading_message = await update.message.reply_text(
-            f"<b>🔄 Đang mở video bằng {current_browser_type.capitalize()}...</b>",
-            parse_mode="HTML"
-        )
-        
-        try:
-            await page.goto(youtube_url, timeout=30000)  # Timeout 30 giây
-            
-            # Chờ video load
-            try:
-                await page.wait_for_selector("video", state="attached", timeout=15000)
-                await loading_message.edit_text(
-                    f"<b>✅ Đã mở video YouTube thành công trên {current_browser_type.capitalize()}.</b>",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning(f"Không tìm thấy trình phát video: {e}")
-                await loading_message.edit_text(
-                    "<b>⚠️ Không thể tìm thấy trình phát video. Trang đã được mở nhưng có thể không phải là video YouTube.</b>",
-                    parse_mode="HTML"
-                )
-            
-            # Tạo các nút điều khiển
-            keyboard = [
-                [InlineKeyboardButton("⏯ Phát / Tạm dừng", callback_data="play_pause"),
-                InlineKeyboardButton("⏪ Tua lại 10s", callback_data="rewind")],
-                [InlineKeyboardButton("⏩ Tua tới 10s", callback_data="forward"),
-                InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                "<b>🎮 Chọn hành động:</b>",
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error(f"Lỗi khi mở URL {youtube_url}: {e}")
-            await loading_message.edit_text(
-                f"<b>❌ Không thể mở URL.</b> Kiểm tra kết nối mạng hoặc URL.",
-                parse_mode="HTML"
-            )
-            
-    except Exception as e:
-        # Đảm bảo thông báo lỗi an toàn cho HTML
-        error_msg = str(e)
-        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
-        await update.message.reply_text(
-            f"<b>❌ Có lỗi xảy ra:</b> {safe_error}",
-            parse_mode="HTML"
-        )
-
-# Xử lý button điều khiển video
-async def video_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý các button điều khiển video"""
-    global page, browser
-    
-    query = update.callback_query
-    await query.answer()
-    
-    # Kiểm tra quyền người dùng thông qua update
-    if not await check_user_permission(update):
-        return
-    
-    # Kiểm tra xem page có tồn tại không
-    if not page:
-        await query.edit_message_text(
-            "<b>❌ Không có trình duyệt nào đang mở.</b>",
-            parse_mode="HTML"
-        )
-        return
-    
-    action = query.data
-    try:
-        if action == "play_pause":
-            # Thực thi JavaScript để phát/tạm dừng video
-            await page.evaluate("document.querySelector('video').paused ? document.querySelector('video').play() : document.querySelector('video').pause()")
-            await query.edit_message_text(
-                "<b>✅ Đã chuyển trạng thái phát / tạm dừng.</b>",
-                parse_mode="HTML"
-            )
-            
-        elif action == "rewind":
-            # Tua lại 10 giây
-            await page.evaluate("document.querySelector('video').currentTime -= 10")
-            await query.edit_message_text(
-                "<b>⏪ Đã tua lại 10 giây.</b>",
-                parse_mode="HTML"
-            )
-            
-        elif action == "forward":
-            # Tua tiến 10 giây
-            await page.evaluate("document.querySelector('video').currentTime += 10")
-            await query.edit_message_text(
-                "<b>⏩ Đã tua tới 10 giây.</b>",
-                parse_mode="HTML"
-            )
-            
-        elif action == "close_browser":
-            # Đóng trình duyệt
-            success, message = await close_browser()
-            await query.edit_message_text(
-                f"<b>✅ Đã đóng trình duyệt {current_browser_type.capitalize()}.</b>",
-                parse_mode="HTML"
-            )
-            return
-            
-        # Lưu lại và giữ các nút điều khiển video luôn hoạt động (trừ khi đã đóng toàn bộ)
-        if action != "close_browser":
-            keyboard = [
-                [InlineKeyboardButton("⏯ Phát / Tạm dừng", callback_data="play_pause"),
-                 InlineKeyboardButton("⏪ Tua lại 10s", callback_data="rewind")],
-                [InlineKeyboardButton("⏩ Tua tới 10s", callback_data="forward"),
-                 InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-    except Exception as e:
-        await query.edit_message_text(
-            f"<b>❌ Có lỗi xảy ra khi điều khiển video:</b> {str(e)}",
-            parse_mode="HTML"
-        )
-
-# Lệnh mở web tùy chỉnh
-async def open_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mở một trang web và hiển thị các điều khiển"""
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-        
-    global page
-    
-    if not context.args:
-        await update.message.reply_text(
-            """
-            <b>⚠️ Hãy nhập URL website bạn muốn mở. Ví dụ:</b>
-            <code>/openweb https://www.google.com</code>
-            <b>hoặc</b>
-            <code>/openweb google.com</code>
-            """,
-            parse_mode="HTML"
-        )
-        return
-    
-    url = " ".join(context.args).strip()
-    
-    try:
-        # Kiểm tra nếu trình duyệt đã khởi tạo chưa
-        if not browser or not page:
-            init_message = await update.message.reply_text(
-                f"<b>🔄 Đang khởi động trình duyệt {current_browser_type.capitalize()}...</b>",
-                parse_mode="HTML"
-            )
-            success, message = await initialize_browser()
-            if not success:
-                # Đảm bảo thông báo lỗi an toàn cho HTML
-                safe_message = message.replace("<", "&lt;").replace(">", "&gt;")
-                await init_message.edit_text(
-                    f"<b>❌ Không thể khởi động trình duyệt:</b> {safe_message}",
-                    parse_mode="HTML"
-                )
-                return
-            else:
-                await init_message.edit_text(
-                    f"<b>✅ Đã khởi động trình duyệt {current_browser_type.capitalize()} thành công.</b>",
-                    parse_mode="HTML"
-                )
-        
-        # Thêm http:// nếu cần
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        
-        # Mở trang web
-        loading_message = await update.message.reply_text(
-            f"<b>🔄 Đang mở trang web {url}...</b>",
-            parse_mode="HTML"
-        )
-        
-        try:
-            await page.goto(url, timeout=30000)  # Timeout 30 giây
-            await loading_message.edit_text(
-                f"<b>✅ Đã mở trang web {url} trong trình duyệt {current_browser_type.capitalize()}.</b>",
-                parse_mode="HTML"
-            )
-            
-            # Tạo các nút điều khiển
-            keyboard = [
-                [InlineKeyboardButton("🔄 Tải lại", callback_data="reload_page"),
-                InlineKeyboardButton("⬅️ Quay lại", callback_data="back_page")],
-                [InlineKeyboardButton("➡️ Tiến tới", callback_data="forward_page"),
-                InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                "<b>🎮 Chọn hành động:</b>",
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error(f"Lỗi khi mở URL {url}: {e}")
-            await loading_message.edit_text(
-                f"<b>❌ Không thể mở URL.</b> Kiểm tra kết nối mạng hoặc URL.",
-                parse_mode="HTML"
-            )
-            
-    except Exception as e:
-        # Đảm bảo thông báo lỗi an toàn cho HTML
-        error_msg = str(e)
-        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
-        await update.message.reply_text(
-            f"<b>❌ Có lỗi xảy ra khi mở trang web:</b> {safe_error}",
-            parse_mode="HTML"
-        )
-
-# Xử lý các nút điều khiển web
-async def web_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý các button điều khiển trình duyệt"""
-    global page
-    
-    query = update.callback_query
-    await query.answer()
-    
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-    
-    # Kiểm tra xem page có tồn tại không
-    if not page:
-        await query.edit_message_text(
-            "<b>❌ Không có trình duyệt nào đang mở.</b>",
-            parse_mode="HTML"
-        )
-        return
-    
-    action = query.data
-    try:
-        if action == "reload_page":
-            await page.reload()
-            await query.edit_message_text(
-                "<b>🔄 Đã tải lại trang.</b>",
-                parse_mode="HTML"
-            )
-            
-        elif action == "back_page":
-            if await page.evaluate("window.history.length > 1"):
-                await page.go_back()
-                await query.edit_message_text(
-                    "<b>⬅️ Đã quay lại trang trước.</b>",
-                    parse_mode="HTML"
-                )
-            else:
-                await query.edit_message_text(
-                    "<b>⚠️ Không có trang trước để quay lại.</b>",
-                    parse_mode="HTML"
-                )
-            
-        elif action == "forward_page":
-            can_go_forward = await page.evaluate("window.history.length > 1 && window.history.state !== null")
-            if can_go_forward:
-                await page.go_forward()
-                await query.edit_message_text(
-                    "<b>➡️ Đã tiến tới trang sau.</b>",
-                    parse_mode="HTML"
-                )
-            else:
-                await query.edit_message_text(
-                    "<b>⚠️ Không có trang sau để tiến tới.</b>",
-                    parse_mode="HTML"
-                )
-            
-        elif action == "close_browser":
-            success, message = await close_browser()
-            await query.edit_message_text(
-                f"<b>✅ Đã đóng trình duyệt {current_browser_type.capitalize()}.</b>",
-                parse_mode="HTML"
-            )
-            return
-            
-        # Lưu lại và giữ các nút điều khiển web luôn hoạt động (trừ khi đã đóng toàn bộ)
-        if action != "close_browser":
-            keyboard = [
-                [InlineKeyboardButton("🔄 Tải lại", callback_data="reload_page"),
-                 InlineKeyboardButton("⬅️ Quay lại", callback_data="back_page")],
-                [InlineKeyboardButton("➡️ Tiến tới", callback_data="forward_page"),
-                 InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-    except Exception as e:
-        await query.edit_message_text(
-            f"<b>❌ Có lỗi xảy ra khi điều khiển trình duyệt:</b> {str(e)}",
-            parse_mode="HTML"
-        )
-
-###########################################
-# ĐIỀU KHIỂN CHUỘT VÀ BÀN PHÍM
-###########################################
-
-# Lệnh /mouse_virtual_system
-async def mouse_virtual_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khởi động touchpad ảo qua Ngrok và gửi URL"""
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-        
-    # Kiểm tra xem Flask và Ngrok có sẵn không
-    if not FLASK_NGROK_AVAILABLE:
-        await update.message.reply_text(
-            "<b>❌ Tính năng này yêu cầu Flask và pyngrok.</b>\n"
-            "<b>Vui lòng cài đặt thư viện bằng lệnh:</b>\n"
-            "<code>pip install flask pyngrok</code>",
-            parse_mode="HTML"
-        )
-        return
-        
-    # Kiểm tra xem mouse controller có khả dụng không
-    if not mouse:
-        await update.message.reply_text(
-            "<b>❌ Không thể khởi tạo bộ điều khiển chuột.</b>\n"
-            "<b>Vui lòng kiểm tra quyền truy cập hoặc chạy với quyền admin.</b>",
-            parse_mode="HTML"
-        )
-        return
-        
-    global ngrok_tunnel, flask_server_thread
-    
-    # Thông báo khởi động
-    status_message = await update.message.reply_text(
-        "<b>🔄 Đang khởi động touchpad ảo qua Ngrok, vui lòng đợi...</b>",
-        parse_mode="HTML"
-    )
-    
-    try:
-        # Kiểm tra và khởi động Flask server nếu chưa chạy
-        if 'flask_server_thread' not in context.bot_data or not context.bot_data['flask_server_thread'].is_alive():
-            # Khởi động server Flask trong một thread riêng
-            flask_server_thread = Thread(target=start_flask_server)
-            flask_server_thread.daemon = True  # Theo dõi luồng chính khi đóng
-            flask_server_thread.start()
-            context.bot_data['flask_server_thread'] = flask_server_thread
-            
-            # Thông báo khởi động Flask
-            await status_message.edit_text(
-                "<b>✅ Đã khởi động máy chủ web Flask thành công.</b>\n<b>🔄 Đang kết nối Ngrok...</b>",
-                parse_mode="HTML"
-            )
-            
-            # Đợi Flask khởi động
-            time.sleep(2)
-        
-        # Khởi động Ngrok nếu chưa chạy
-        if not ngrok_tunnel:
-            try:
-                # Khởi động Ngrok và lấy URL
-                public_url = start_ngrok()
-                
-                if not public_url:
-                    await status_message.edit_text(
-                        "<b>❌ Không thể khởi động Ngrok.</b>\n\n"
-                        "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
-                        parse_mode="HTML"
-                    )
-                    return
-                    
-                # Tạo QR code để quét
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_touchpad")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                # Gửi URL và hướng dẫn
-                await status_message.edit_text(
-                    f"<b>✅ Touchpad ảo đã sẵn sàng!</b>\n\n"
-                    f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n{public_url}\n\n"
-                    f"<b>📱 Để điều khiển chuột:</b>\n"
-                    f"• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n"
-                    f"• Nhấn nút để thực hiện các thao tác chuột\n"
-                    f"• Chế độ cuộn cho phép bạn cuộn trang lên/xuống\n\n"
-                    f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
-                    reply_markup=reply_markup,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"Lỗi khi khởi động Ngrok: {e}")
-                # Xử lý lỗi khi khởi động Ngrok
-                await status_message.edit_text(
-                    f"<b>❌ Lỗi khi khởi động Ngrok:</b> {str(e)}\n\n<b>Vui lòng kiểm tra cài đặt Ngrok và thử lại.</b>",
-                    parse_mode="HTML"
-                )
-        else:
-            # Nếu Ngrok đã chạy, gửi URL hiện tại
-            keyboard = [
-                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_touchpad")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await status_message.edit_text(
-                f"<b>✅ Touchpad ảo đã sẵn sàng!</b>\n\n"
-                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n<code>{ngrok_tunnel.public_url}</code>\n\n"
-                f"<b>📱 Để điều khiển chuột:</b>\n"
-                f"• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n"
-                f"• Nhấn nút để thực hiện các thao tác chuột\n"
-                f"• Chế độ cuộn cho phép bạn cuộn trang lên/xuống\n\n"
-                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-    except Exception as e:
-        logger.error(f"Lỗi khi khởi tạo touchpad ảo: {e}")
-        # Xử lý lỗi chung
-        await status_message.edit_text(
-            f"<b>❌ Có lỗi xảy ra khi khởi tạo touchpad ảo:</b> {str(e)}",
-            parse_mode="HTML"
-        )
-
-# Xử lý nút làm mới touchpad
-async def refresh_touchpad(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Làm mới kết nối Ngrok"""
-    global ngrok_tunnel
-    
-    query = update.callback_query
-    await query.answer()
-    
-    # Kiểm tra quyền người dùng
-    if not await check_user_permission(update):
-        return
-    
-    # Kiểm tra xem Flask và Ngrok có sẵn không
-    if not FLASK_NGROK_AVAILABLE:
-        await query.edit_message_text(
-            "<b>❌ Tính năng này yêu cầu Flask và pyngrok.</b>\n"
-            "<b>Vui lòng cài đặt thư viện bằng lệnh:</b>\n"
-            "<code>pip install flask pyngrok</code>",
-            parse_mode="HTML"
-        )
-        return
-    
-    # Thông báo đang làm mới
-    await query.edit_message_text(
-        "<b>🔄 Đang làm mới kết nối Ngrok, vui lòng đợi...</b>",
-        parse_mode="HTML"
-    )
-    
-    try:
-        # Dừng Ngrok hiện tại
-        stop_ngrok()
-        
-        # Khởi động lại Ngrok
-        public_url = start_ngrok()
-        
-        if not public_url:
-            await query.edit_message_text(
-                "<b>❌ Không thể khởi động lại Ngrok.</b>\n\n"
-                "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
-                parse_mode="HTML"
-            )
-            return
-            
-        # Tạo lại nút làm mới
-        keyboard = [
-            [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_touchpad")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Gửi thông báo với URL mới
-        await query.edit_message_text(
-            f"<b>✅ Đã làm mới kết nối thành công!</b>\n\n"
-            f"<b>🔗 Truy cập URL mới trên điện thoại của bạn:</b>\n<code>{public_url}</code>\n\n"
-            f"<b>📱 Để điều khiển chuột:</b>\n"
-            f"• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n"
-            f"• Nhấn nút để thực hiện các thao tác chuột\n"
-            f"• Chế độ cuộn cho phép bạn cuộn trang lên/xuống\n\n"
-            f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Lỗi khi làm mới kết nối Ngrok: {e}")
-        await query.edit_message_text(
-            f"<b>❌ Có lỗi khi làm mới kết nối:</b> {str(e)}",
-            parse_mode="HTML"
-        )
 
 # Tạo template HTML cho touchpad âm lượng
 if FLASK_NGROK_AVAILABLE:
@@ -2768,8 +1927,10 @@ if FLASK_NGROK_AVAILABLE:
     def get_volume():
         try:
             # Đảm bảo khởi tạo COM trong thread hiện tại (chỉ trên Windows)
+            com_initialized = False
             if platform.system() == "Windows":
                 comtypes.CoInitialize()
+                com_initialized = True
             
             volume_percent = get_volume_percentage()
             return jsonify({"volume": volume_percent})
@@ -2778,7 +1939,7 @@ if FLASK_NGROK_AVAILABLE:
             return jsonify({"volume": 50, "error": str(e)})  # Giá trị mặc định nếu lỗi
         finally:
             # Giải phóng COM (chỉ trên Windows)
-            if platform.system() == "Windows":
+            if platform.system() == "Windows" and com_initialized:
                 try:
                     comtypes.CoUninitialize()
                 except:
@@ -2789,8 +1950,10 @@ if FLASK_NGROK_AVAILABLE:
     def set_volume():
         try:
             # Đảm bảo khởi tạo COM trong thread hiện tại (chỉ trên Windows)
+            com_initialized = False
             if platform.system() == "Windows":
                 comtypes.CoInitialize()
+                com_initialized = True
             
             data = request.json
             volume_percent = data.get('volume', 50)
@@ -2817,7 +1980,7 @@ if FLASK_NGROK_AVAILABLE:
             })
         finally:
             # Giải phóng COM (chỉ trên Windows)
-            if platform.system() == "Windows":
+            if platform.system() == "Windows" and com_initialized:
                 try:
                     comtypes.CoUninitialize()
                 except:
@@ -2855,7 +2018,9 @@ def get_current_volume():
         
     try:
         # Khởi tạo COM trước khi truy cập
+        com_initialized = False
         comtypes.CoInitialize()
+        com_initialized = True
         
         volume = get_windows_volume_interface()
         if volume:
@@ -2867,10 +2032,11 @@ def get_current_volume():
         return 0.5
     finally:
         # Giải phóng tài nguyên COM
-        try:
-            comtypes.CoUninitialize()
-        except:
-            pass
+        if com_initialized:
+            try:
+                comtypes.CoUninitialize()
+            except:
+                pass
 
 def set_windows_volume(volume_level):
     """Đặt mức âm lượng (0.0 đến 1.0)"""
@@ -2879,7 +2045,9 @@ def set_windows_volume(volume_level):
         
     try:
         # Khởi tạo COM trước khi truy cập
+        com_initialized = False
         comtypes.CoInitialize()
+        com_initialized = True
         
         # Đảm bảo giá trị âm lượng nằm trong khoảng hợp lệ
         volume_level = max(0.0, min(1.0, volume_level))
@@ -2898,10 +2066,11 @@ def set_windows_volume(volume_level):
         return False
     finally:
         # Giải phóng tài nguyên COM
-        try:
-            comtypes.CoUninitialize()
-        except:
-            pass
+        if com_initialized:
+            try:
+                comtypes.CoUninitialize()
+            except:
+                pass
 
 def get_volume_percentage():
     """Lấy mức âm lượng dưới dạng phần trăm"""
@@ -2915,13 +2084,99 @@ def get_volume_percentage():
         logger.error(f"Lỗi khi tính phần trăm âm lượng: {e}")
         return 50  # Giá trị mặc định
 
-# Lệnh touchpad điều chỉnh âm lượng
-async def volume_virtual_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khởi động touchpad điều chỉnh âm lượng qua Ngrok và gửi URL"""
+# ĐỊNH NGHĨA LỆNH VÀ NHÓM LỆNH
+
+# Định nghĩa các nhóm lệnh để hiển thị trong menu
+COMMAND_GROUPS = {
+    "intro": {
+        "title": "⚡️ GIỚI THIỆU",
+        "commands": {
+            "/introduce": "Giới thiệu về tôi."
+        }
+    },
+    "system": {
+        "title": "⚡️ ĐIỀU KHIỂN HỆ THỐNG",
+        "commands": {
+            "/shutdown": "Lệnh tắt máy.",
+            "/sleep": "Lệnh vào chế độ ngủ.",
+            "/restart": "Lệnh khởi động máy.",
+            "/cancel": "Huỷ toàn bộ các lệnh."
+        }
+    },
+    "image": {
+        "title": "⚡️ LỆNH HÌNH ẢNH",
+        "commands": {
+            "/screen_shot": "Chụp ảnh màn hình và gửi về máy.",
+            "/record_video": "Quay video màn hình và gửi về máy."
+        }
+    },
+    "file": {
+        "title": "⚡️ QUẢN LÝ FILE",
+        "commands": {
+            "/upload_file": "Người dùng gửi file để tải lên máy.",
+            "/download_file": "Người dùng nhập đường dẫn để tải về.",
+            "/deletefile": "Người dùng nhập đường dẫn để xoá file."
+        }
+    },
+    "info": {
+        "title": "⚡️ THÔNG TIN HỆ THỐNG",
+        "commands": {
+            "/tasklist": "Danh sách các tiến trình đang chạy.",
+            "/systeminfo": "Thông tin hệ thống.",
+            "/netuser": "Danh sách người dùng trên máy tính.",
+            "/whoami": "Tên tài khoản đang đăng nhập.",
+            "/hostname": "Hiển thị tên máy tính."
+        }
+    },
+    "network": {
+        "title": "⚡️ MẠNG",
+        "commands": {
+            "/ipconfig": "Thông tin cấu hình mạng.",
+            "/release": "Giải phóng địa chỉ IP hiện tại.",
+            "/renew": "Gia hạn địa chỉ IP mới."
+        }
+    },
+    "browser": {
+        "title": "⚡️ TRÌNH DUYỆT",
+        "commands": {
+            "/playvideo": "Phát video YouTube từ link.",
+            "/openweb": "Mở các trang web.",
+            "/setbrowser": "Chọn trình duyệt mặc định (chrome, brave, edge, opera)."
+        }
+    },
+    "utility": {
+        "title": "⚡️ TIỆN ÍCH",
+        "commands": {
+            "/mouse_virtual_system": "Điều khiển chuột với touchpad ảo.",
+            "/volume_virtual_system": "Điều khiển âm lượng với touchpad ảo.",
+            "/keyboard_emulator": "Điều khiển bàn phím ảo.",
+            "/stop_touchpad": "Dừng touchpad đang chạy."
+        }
+    },
+    "help": {
+        "title": "⚡️ TRỢ GIÚP",
+        "commands": {
+            "/menu": "Hiển thị danh sách các lệnh."
+        }
+    }
+}
+
+# Tạo từ điển COMMANDS từ các nhóm lệnh để sử dụng
+COMMANDS = {}
+for group in COMMAND_GROUPS.values():
+    COMMANDS.update(group["commands"])
+
+# ĐIỀU KHIỂN CHUỘT VÀ BÀN PHÍM
+
+# Lệnh /mouse_virtual_system
+async def mouse_virtual_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khởi động touchpad ảo qua Ngrok và gửi URL"""
     # Kiểm tra quyền người dùng
     if not await check_user_permission(update):
         return
-    
+        
+    global current_touchpad_type, active_touchpad_chat_id, flask_server_thread, ngrok_tunnel, touchpad_active
+        
     # Kiểm tra xem Flask và Ngrok có sẵn không
     if not FLASK_NGROK_AVAILABLE:
         await update.message.reply_text(
@@ -2932,26 +2187,67 @@ async def volume_virtual_system(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
         
-    # Kiểm tra xem pycaw có sẵn không
-    if not PYCAW_AVAILABLE or platform.system() != "Windows":
+    # Kiểm tra xem mouse controller có khả dụng không
+    if not mouse:
         await update.message.reply_text(
-            "<b>❌ Không thể điều khiển âm lượng vì thư viện pycaw không khả dụng hoặc bạn đang sử dụng hệ điều hành không phải Windows.</b> "
-            "<b>Vui lòng kiểm tra cài đặt thư viện và hệ điều hành.</b>",
+            "<b>❌ Không thể khởi tạo bộ điều khiển chuột.</b>\n"
+            "<b>Vui lòng kiểm tra quyền truy cập hoặc chạy với quyền admin.</b>",
             parse_mode="HTML"
         )
         return
     
-    global ngrok_tunnel, flask_server_thread
-    
-    # Thông báo khởi động
-    status_message = await update.message.reply_text(
-        "<b>🔄 Đang khởi động touchpad âm lượng qua Ngrok, vui lòng đợi...</b>",
-        parse_mode="HTML"
-    )
+    # Kiểm tra nếu có touchpad khác đang chạy
+    if current_touchpad_type is not None and touchpad_active:
+        # Nếu đang chạy chính touchpad này, chỉ cần gửi lại URL
+        if current_touchpad_type == "mouse" and active_touchpad_chat_id == update.effective_chat.id and ngrok_tunnel:
+            keyboard = [
+                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_touchpad")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"<b>✅ Touchpad chuột đã đang chạy!</b>\n\n"
+                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n<code>{ngrok_tunnel.public_url}</code>\n\n"
+                f"<b>📱 Để điều khiển chuột:</b>\n"
+                f"• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n"
+                f"• Nhấn nút để thực hiện các thao tác chuột\n"
+                f"• Chế độ cuộn cho phép bạn cuộn trang lên/xuống\n\n"
+                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+            return
+        
+        # Thông báo đang dừng touchpad cũ
+        status_message = await update.message.reply_text(
+            f"<b>🔄 Đang dừng {current_touchpad_type} touchpad đang chạy...</b>",
+            parse_mode="HTML"
+        )
+        
+        # Dừng touchpad hiện tại
+        success, message = await stop_current_touchpad(update, context)
+        if not success:
+            await status_message.edit_text(
+                f"<b>❌ Không thể dừng touchpad hiện tại:</b> {message}",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Cập nhật thông báo
+        await status_message.edit_text(
+            f"<b>✅ Đã dừng {message}</b>\n<b>🔄 Đang khởi động mouse touchpad mới...</b>",
+            parse_mode="HTML"
+        )
+    else:
+        # Thông báo khởi động
+        status_message = await update.message.reply_text(
+            "<b>🔄 Đang khởi động touchpad ảo qua Ngrok, vui lòng đợi...</b>",
+            parse_mode="HTML"
+        )
     
     try:
         # Kiểm tra và khởi động Flask server nếu chưa chạy
-        if 'flask_server_thread' not in context.bot_data or not context.bot_data['flask_server_thread'].is_alive():
+        if 'flask_server_thread' not in context.bot_data or not context.bot_data['flask_server_thread'] or not context.bot_data['flask_server_thread'].is_alive():
             # Khởi động server Flask trong một thread riêng
             flask_server_thread = Thread(target=start_flask_server)
             flask_server_thread.daemon = True  # Theo dõi luồng chính khi đóng
@@ -2967,73 +2263,74 @@ async def volume_virtual_system(update: Update, context: ContextTypes.DEFAULT_TY
             # Đợi Flask khởi động
             time.sleep(2)
         
-        # Khởi động Ngrok nếu chưa chạy
-        if not ngrok_tunnel:
-            try:
-                # Khởi động Ngrok và lấy URL
-                public_url = start_ngrok()
-                
-                if not public_url:
-                    await status_message.edit_text(
-                        "<b>❌ Không thể khởi động Ngrok.</b>\n\n"
-                        "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
-                        parse_mode="HTML"
-                    )
-                    return
-                
-                # Tạo button làm mới
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_volume_touchpad")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                # Gửi URL và hướng dẫn
+        # Cập nhật biến toàn cục
+        current_touchpad_type = "mouse"
+        active_touchpad_chat_id = update.effective_chat.id
+        touchpad_active = True
+        
+        # Khởi động Ngrok
+        try:
+            # Khởi động Ngrok và lấy URL
+            public_url = start_ngrok()
+            
+            if not public_url:
                 await status_message.edit_text(
-                    f"<b>✅ Touchpad điều chỉnh âm lượng đã sẵn sàng!</b>\n\n"
-                    f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n{public_url}/volume\n\n"
-                    f"<b>📱 Hướng dẫn sử dụng:</b>\n"
-                    f"• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n"
-                    f"• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể\n\n"
-                    f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
-                    reply_markup=reply_markup,
+                    "<b>❌ Không thể khởi động Ngrok.</b>\n\n"
+                    "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
                     parse_mode="HTML"
                 )
-            except Exception as e:
-                logger.error(f"Lỗi khi khởi động Ngrok: {e}")
-                # Xử lý lỗi khi khởi động Ngrok
-                await status_message.edit_text(
-                    f"<b>❌ Lỗi khi khởi động Ngrok:</b> {str(e)}\n\n<b>Vui lòng kiểm tra cài đặt Ngrok và thử lại.</b>",
-                    parse_mode="HTML"
-                )
-        else:
-            # Nếu Ngrok đã chạy, gửi URL hiện tại
+                # Reset biến
+                current_touchpad_type = None
+                active_touchpad_chat_id = None
+                touchpad_active = False
+                return
+                
+            # Tạo QR code để quét
             keyboard = [
-                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_volume_touchpad")]
+                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_touchpad")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Gửi URL và hướng dẫn
             await status_message.edit_text(
-                f"<b>✅ Touchpad điều chỉnh âm lượng đã sẵn sàng!</b>\n\n"
-                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n<code>{ngrok_tunnel.public_url}/volume</code>\n\n"
-                f"<b>📱 Hướng dẫn sử dụng:</b>\n"
-                f"• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n"
-                f"• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể\n\n"
-                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
+                f"<b>✅ Touchpad ảo đã sẵn sàng!</b>\n\n"
+                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n{public_url}\n\n"
+                f"<b>📱 Để điều khiển chuột:</b>\n"
+                f"• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n"
+                f"• Nhấn nút để thực hiện các thao tác chuột\n"
+                f"• Chế độ cuộn cho phép bạn cuộn trang lên/xuống\n\n"
+                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>\n"
+                f"<b>💡 Sử dụng /stop_touchpad để dừng khi không cần nữa</b>",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
+        except Exception as e:
+            logger.error(f"Lỗi khi khởi động Ngrok: {e}")
+            # Xử lý lỗi khi khởi động Ngrok
+            await status_message.edit_text(
+                f"<b>❌ Lỗi khi khởi động Ngrok:</b> {str(e)}\n\n<b>Vui lòng kiểm tra cài đặt Ngrok và thử lại.</b>",
+                parse_mode="HTML"
+            )
+            # Reset biến
+            current_touchpad_type = None
+            active_touchpad_chat_id = None
+            touchpad_active = False
     except Exception as e:
-        logger.error(f"Lỗi khi khởi tạo touchpad âm lượng: {e}")
+        logger.error(f"Lỗi khi khởi tạo touchpad ảo: {e}")
         # Xử lý lỗi chung
         await status_message.edit_text(
-            f"<b>❌ Có lỗi xảy ra khi khởi tạo touchpad âm lượng:</b> {str(e)}",
+            f"<b>❌ Có lỗi xảy ra khi khởi tạo touchpad ảo:</b> {str(e)}",
             parse_mode="HTML"
         )
+        # Reset biến
+        current_touchpad_type = None
+        active_touchpad_chat_id = None
+        touchpad_active = False
 
-# Xử lý nút làm mới touchpad âm lượng
-async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Làm mới kết nối Ngrok cho touchpad âm lượng"""
-    global ngrok_tunnel
+# Xử lý nút làm mới touchpad
+async def refresh_touchpad(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Làm mới kết nối Ngrok"""
+    global ngrok_tunnel, current_touchpad_type, active_touchpad_chat_id, touchpad_active
     
     query = update.callback_query
     await query.answer()
@@ -3048,6 +2345,15 @@ async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_
             "<b>❌ Tính năng này yêu cầu Flask và pyngrok.</b>\n"
             "<b>Vui lòng cài đặt thư viện bằng lệnh:</b>\n"
             "<code>pip install flask pyngrok</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Kiểm tra xem có touchpad đang chạy không
+    if not current_touchpad_type or not touchpad_active:
+        await query.edit_message_text(
+            "<b>❌ Không có touchpad nào đang hoạt động.</b>\n"
+            "<b>Hãy khởi động touchpad trước bằng /mouse_virtual_system hoặc /volume_virtual_system</b>",
             parse_mode="HTML"
         )
         return
@@ -3071,6 +2377,275 @@ async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_
                 "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
                 parse_mode="HTML"
             )
+            # Reset biến
+            current_touchpad_type = None
+            active_touchpad_chat_id = None
+            touchpad_active = False
+            return
+        
+        # Tùy chỉnh thông báo dựa trên loại touchpad
+        touchpad_type = current_touchpad_type
+        action_info = ""
+        endpoint = ""
+        
+        if touchpad_type == "mouse":
+            action_info = "• Chạm và kéo trên màn hình touchpad để di chuyển chuột\n" \
+                         "• Nhấn nút để thực hiện các thao tác chuột\n" \
+                         "• Chế độ cuộn cho phép bạn cuộn trang lên/xuống"
+            callback_data = "refresh_touchpad"
+            endpoint = ""
+        elif touchpad_type == "volume":
+            action_info = "• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n" \
+                         "• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể"
+            callback_data = "refresh_volume_touchpad"
+            endpoint = "/volume"
+        else:
+            # Trường hợp không xác định
+            await query.edit_message_text(
+                "<b>❌ Loại touchpad không hợp lệ.</b>",
+                parse_mode="HTML"
+            )
+            return
+            
+        # Tạo lại nút làm mới
+        keyboard = [
+            [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data=callback_data)]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Gửi thông báo với URL mới
+        await query.edit_message_text(
+            f"<b>✅ Đã làm mới kết nối thành công!</b>\n\n"
+            f"<b>🔗 Truy cập URL mới trên điện thoại của bạn:</b>\n<code>{public_url}{endpoint}</code>\n\n"
+            f"<b>📱 Hướng dẫn sử dụng:</b>\n"
+            f"{action_info}\n\n"
+            f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>\n"
+            f"<b>💡 Sử dụng /stop_touchpad để dừng khi không cần nữa</b>",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Lỗi khi làm mới kết nối Ngrok: {e}")
+        await query.edit_message_text(
+            f"<b>❌ Có lỗi khi làm mới kết nối:</b> {str(e)}",
+            parse_mode="HTML"
+        )
+        # Reset biến khi có lỗi
+        current_touchpad_type = None
+        active_touchpad_chat_id = None
+        touchpad_active = False
+
+# Lệnh touchpad điều chỉnh âm lượng
+async def volume_virtual_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khởi động touchpad điều chỉnh âm lượng qua Ngrok và gửi URL"""
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+    
+    global current_touchpad_type, active_touchpad_chat_id, flask_server_thread, ngrok_tunnel, touchpad_active
+    
+    # Kiểm tra xem Flask và Ngrok có sẵn không
+    if not FLASK_NGROK_AVAILABLE:
+        await update.message.reply_text(
+            "<b>❌ Tính năng này yêu cầu Flask và pyngrok.</b>\n"
+            "<b>Vui lòng cài đặt thư viện bằng lệnh:</b>\n"
+            "<code>pip install flask pyngrok</code>",
+            parse_mode="HTML"
+        )
+        return
+        
+    # Kiểm tra xem pycaw có sẵn không
+    if not PYCAW_AVAILABLE or platform.system() != "Windows":
+        await update.message.reply_text(
+            "<b>❌ Không thể điều khiển âm lượng vì thư viện pycaw không khả dụng hoặc bạn đang sử dụng hệ điều hành không phải Windows.</b> "
+            "<b>Vui lòng kiểm tra cài đặt thư viện và hệ điều hành.</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Kiểm tra nếu có touchpad khác đang chạy
+    if current_touchpad_type is not None and touchpad_active:
+        # Nếu đang chạy chính touchpad này, chỉ cần gửi lại URL
+        if current_touchpad_type == "volume" and active_touchpad_chat_id == update.effective_chat.id and ngrok_tunnel:
+            keyboard = [
+                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_volume_touchpad")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"<b>✅ Touchpad âm lượng đã đang chạy!</b>\n\n"
+                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n<code>{ngrok_tunnel.public_url}/volume</code>\n\n"
+                f"<b>📱 Hướng dẫn sử dụng:</b>\n"
+                f"• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n"
+                f"• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể\n\n"
+                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+            return
+        
+        # Thông báo đang dừng touchpad cũ
+        status_message = await update.message.reply_text(
+            f"<b>🔄 Đang dừng {current_touchpad_type} touchpad đang chạy...</b>",
+            parse_mode="HTML"
+        )
+        
+        # Dừng touchpad hiện tại
+        success, message = await stop_current_touchpad(update, context)
+        if not success:
+            await status_message.edit_text(
+                f"<b>❌ Không thể dừng touchpad hiện tại:</b> {message}",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Cập nhật thông báo
+        await status_message.edit_text(
+            f"<b>✅ Đã dừng {message}</b>\n<b>🔄 Đang khởi động volume touchpad mới...</b>",
+            parse_mode="HTML"
+        )
+    else:
+        # Thông báo khởi động
+        status_message = await update.message.reply_text(
+            "<b>🔄 Đang khởi động touchpad âm lượng qua Ngrok, vui lòng đợi...</b>",
+            parse_mode="HTML"
+        )
+    
+    try:
+        # Kiểm tra và khởi động Flask server nếu chưa chạy
+        if 'flask_server_thread' not in context.bot_data or not context.bot_data['flask_server_thread'] or not context.bot_data['flask_server_thread'].is_alive():
+            # Khởi động server Flask trong một thread riêng
+            flask_server_thread = Thread(target=start_flask_server)
+            flask_server_thread.daemon = True  # Theo dõi luồng chính khi đóng
+            flask_server_thread.start()
+            context.bot_data['flask_server_thread'] = flask_server_thread
+            
+            # Thông báo khởi động Flask
+            await status_message.edit_text(
+                "<b>✅ Đã khởi động máy chủ web Flask thành công.</b>\n<b>🔄 Đang kết nối Ngrok...</b>",
+                parse_mode="HTML"
+            )
+            
+            # Đợi Flask khởi động
+            time.sleep(2)
+        
+        # Cập nhật biến toàn cục
+        current_touchpad_type = "volume"
+        active_touchpad_chat_id = update.effective_chat.id
+        touchpad_active = True
+        
+        # Khởi động Ngrok
+        try:
+            # Khởi động Ngrok và lấy URL
+            public_url = start_ngrok()
+            
+            if not public_url:
+                await status_message.edit_text(
+                    "<b>❌ Không thể khởi động Ngrok.</b>\n\n"
+                    "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
+                    parse_mode="HTML"
+                )
+                # Reset biến
+                current_touchpad_type = None
+                active_touchpad_chat_id = None
+                touchpad_active = False
+                return
+            
+            # Tạo button làm mới
+            keyboard = [
+                [InlineKeyboardButton("🔄 Làm mới kết nối", callback_data="refresh_volume_touchpad")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Gửi URL và hướng dẫn
+            await status_message.edit_text(
+                f"<b>✅ Touchpad điều chỉnh âm lượng đã sẵn sàng!</b>\n\n"
+                f"<b>🔗 Truy cập URL sau trên điện thoại của bạn:</b>\n{public_url}/volume\n\n"
+                f"<b>📱 Hướng dẫn sử dụng:</b>\n"
+                f"• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n"
+                f"• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể\n\n"
+                f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>\n"
+                f"<b>💡 Sử dụng /stop_touchpad để dừng khi không cần nữa</b>",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Lỗi khi khởi động Ngrok: {e}")
+            # Xử lý lỗi khi khởi động Ngrok
+            await status_message.edit_text(
+                f"<b>❌ Lỗi khi khởi động Ngrok:</b> {str(e)}\n\n<b>Vui lòng kiểm tra cài đặt Ngrok và thử lại.</b>",
+                parse_mode="HTML"
+            )
+            # Reset biến
+            current_touchpad_type = None
+            active_touchpad_chat_id = None
+            touchpad_active = False
+    except Exception as e:
+        logger.error(f"Lỗi khi khởi tạo touchpad âm lượng: {e}")
+        # Xử lý lỗi chung
+        await status_message.edit_text(
+            f"<b>❌ Có lỗi xảy ra khi khởi tạo touchpad âm lượng:</b> {str(e)}",
+            parse_mode="HTML"
+        )
+        # Reset biến
+        current_touchpad_type = None
+        active_touchpad_chat_id = None
+        touchpad_active = False
+
+# Xử lý nút làm mới touchpad âm lượng
+async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Làm mới kết nối Ngrok cho touchpad âm lượng"""
+    global ngrok_tunnel, current_touchpad_type, active_touchpad_chat_id, touchpad_active
+    
+    query = update.callback_query
+    await query.answer()
+    
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+    
+    # Kiểm tra xem Flask và Ngrok có sẵn không
+    if not FLASK_NGROK_AVAILABLE:
+        await query.edit_message_text(
+            "<b>❌ Tính năng này yêu cầu Flask và pyngrok.</b>\n"
+            "<b>Vui lòng cài đặt thư viện bằng lệnh:</b>\n"
+            "<code>pip install flask pyngrok</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Kiểm tra xem có touchpad đang chạy không
+    if current_touchpad_type != "volume" or not touchpad_active:
+        await query.edit_message_text(
+            "<b>❌ Không có touchpad âm lượng nào đang hoạt động.</b>\n"
+            "<b>Hãy khởi động touchpad trước bằng /volume_virtual_system</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Thông báo đang làm mới
+    await query.edit_message_text(
+        "<b>🔄 Đang làm mới kết nối Ngrok, vui lòng đợi...</b>",
+        parse_mode="HTML"
+    )
+    
+    try:
+        # Dừng Ngrok hiện tại
+        stop_ngrok()
+        
+        # Khởi động lại Ngrok
+        public_url = start_ngrok()
+        
+        if not public_url:
+            await query.edit_message_text(
+                "<b>❌ Không thể khởi động lại Ngrok.</b>\n\n"
+                "<b>Vui lòng kiểm tra kết nối mạng và cài đặt Ngrok.</b>",
+                parse_mode="HTML"
+            )
+            # Reset biến
+            current_touchpad_type = None
+            active_touchpad_chat_id = None
+            touchpad_active = False
             return
         
         # Tạo lại nút làm mới
@@ -3086,7 +2661,8 @@ async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_
             f"<b>📱 Hướng dẫn sử dụng:</b>\n"
             f"• Kéo thanh trượt sang trái/phải để điều chỉnh âm lượng\n"
             f"• Nhấn các nút để nhanh chóng đặt mức âm lượng cụ thể\n\n"
-            f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>",
+            f"<b>⚠️ Kết nối này sẽ hết hạn sau khoảng 2 giờ</b>\n"
+            f"<b>💡 Sử dụng /stop_touchpad để dừng khi không cần nữa</b>",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
@@ -3094,6 +2670,47 @@ async def refresh_volume_touchpad(update: Update, context: ContextTypes.DEFAULT_
         logger.error(f"Lỗi khi làm mới kết nối volume touchpad: {e}")
         await query.edit_message_text(
             f"<b>❌ Có lỗi khi làm mới kết nối:</b> {str(e)}",
+            parse_mode="HTML"
+        )
+        # Reset biến khi có lỗi
+        current_touchpad_type = None
+        active_touchpad_chat_id = None
+        touchpad_active = False
+
+# Lệnh dừng touchpad đang chạy
+async def stop_touchpad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Dừng touchpad đang chạy (mouse hoặc volume)"""
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+    
+    global current_touchpad_type, touchpad_active
+    
+    # Kiểm tra xem có touchpad nào đang chạy không
+    if current_touchpad_type is None or not touchpad_active:
+        await update.message.reply_text(
+            "<b>❌ Không có touchpad nào đang chạy.</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Thông báo đang dừng
+    status_message = await update.message.reply_text(
+        f"<b>🔄 Đang dừng {current_touchpad_type} touchpad...</b>",
+        parse_mode="HTML"
+    )
+    
+    # Dừng touchpad
+    success, message = await stop_current_touchpad(update, context)
+    
+    if success:
+        await status_message.edit_text(
+            f"<b>✅ Đã dừng {message} thành công.</b>",
+            parse_mode="HTML"
+        )
+    else:
+        await status_message.edit_text(
+            f"<b>❌ Không thể dừng touchpad: {message}</b>",
             parse_mode="HTML"
         )
 
@@ -3165,9 +2782,634 @@ async def handle_key_press(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             parse_mode="HTML"
         )
 
-###########################################
+# QUẢN LÝ TRÌNH DUYỆT (PLAYWRIGHT)
+
+# Khởi tạo Playwright và mở trình duyệt
+async def initialize_browser():
+    """Khởi tạo trình duyệt sử dụng Playwright"""
+    global playwright, browser, page, current_browser_type
+
+    try:
+        # Đóng browser hiện tại nếu đang mở
+        await close_browser()
+        
+        # Khởi tạo Playwright
+        playwright = await async_playwright().start()
+        
+        # Chọn trình duyệt dựa trên current_browser_type
+        browser_paths = BROWSER_PATHS
+        user_data_paths = USER_DATA_DIRS
+        
+        # Kiểm tra xem trình duyệt hiện tại có tồn tại không
+        if current_browser_type not in browser_paths or not os.path.exists(browser_paths[current_browser_type]):
+            # Tìm trình duyệt thay thế
+            available_browsers = [b for b in browser_paths if os.path.exists(browser_paths[b])]
+            if not available_browsers:
+                return False, "Không tìm thấy trình duyệt nào được cài đặt trên hệ thống."
+            
+            current_browser_type = available_browsers[0]
+            logger.info(f"Đã chuyển sang trình duyệt thay thế: {current_browser_type}")
+        
+        # Edge có xử lý đặc biệt
+        if current_browser_type == "edge":
+            try:
+                # Sử dụng playwright.chromium với channel="msedge"
+                logger.info("Đang khởi động Microsoft Edge...")
+                
+                # Phương pháp 1: Sử dụng chế độ incognito (không dùng user data)
+                browser = await playwright.chromium.launch(
+                    channel="msedge",
+                    headless=False,
+                    args=["--no-sandbox"]
+                )
+                
+                # Mở một context mới (tương đương incognito)
+                browser_context = await browser.new_context()
+                
+                # Tạo trang mới
+                page = await browser_context.new_page()
+                return True, "Khởi tạo trình duyệt Edge thành công (chế độ ẩn danh)"
+                
+            except Exception as edge_error:
+                # Phương pháp 2: Thử với browser mặc định nếu Edge thất bại
+                error_msg = str(edge_error)
+                logger.error(f"Lỗi khi khởi động Edge: {error_msg}")
+                
+                # Tự động chuyển sang Brave hoặc Chrome nếu Edge không hoạt động
+                # Thử Brave trước
+                if "brave" in browser_paths and os.path.exists(browser_paths["brave"]):
+                    current_browser_type = "brave"
+                # Nếu không có Brave, thử Chrome
+                elif "chrome" in browser_paths and os.path.exists(browser_paths["chrome"]):
+                    current_browser_type = "chrome"
+                else:
+                    # Nếu không có cả Brave và Chrome, trả về lỗi
+                    return False, f"Microsoft Edge gặp lỗi và không tìm thấy trình duyệt thay thế: {error_msg}"
+                
+                # Thông báo lỗi và biện pháp khắc phục đã thực hiện
+                error_info = (
+                    f"Microsoft Edge gặp lỗi: {error_msg.replace('<', '&lt;').replace('>', '&gt;')}\n\n"
+                    f"Bot sẽ tự động chuyển sang trình duyệt {current_browser_type.capitalize()}.\n\n"
+                    f"Gợi ý: Để Edge hoạt động, thử chạy bot với quyền admin hoặc đóng tất cả cửa sổ Edge đang mở trước."
+                )
+                
+                # Tiếp tục với trình duyệt thay thế
+                browser_type = playwright.chromium
+                executable_path = browser_paths[current_browser_type]
+                user_data_dir = user_data_paths[current_browser_type]
+                
+                if not os.path.exists(executable_path):
+                    return False, f"Không tìm thấy trình duyệt {current_browser_type.capitalize()} tại: {executable_path}"
+                
+                if not os.path.exists(user_data_dir):
+                    # Nếu không tìm thấy thư mục dữ liệu, tạo mới
+                    try:
+                        os.makedirs(user_data_dir, exist_ok=True)
+                    except:
+                        return False, f"Không thể tạo thư mục dữ liệu người dùng: {user_data_dir}"
+                
+                try:
+                    browser = await browser_type.launch_persistent_context(
+                        user_data_dir,
+                        executable_path=executable_path,
+                        headless=False
+                    )
+                    
+                    # Tạo trang mới
+                    page = await browser.new_page()
+                    return True, f"Edge gặp lỗi. Đã tự động chuyển sang {current_browser_type.capitalize()}. {error_info}"
+                except Exception as browser_error:
+                    return False, f"Không thể khởi động trình duyệt {current_browser_type.capitalize()} dự phòng: {str(browser_error)}"
+        
+        # Xử lý các trình duyệt khác
+        else:
+            browser_type = playwright.chromium
+            executable_path = browser_paths[current_browser_type]
+            
+            # Kiểm tra đường dẫn user data
+            user_data_dir = user_data_paths[current_browser_type]
+            if not os.path.exists(user_data_dir):
+                # Nếu không tìm thấy thư mục dữ liệu, tạo mới
+                try:
+                    os.makedirs(user_data_dir, exist_ok=True)
+                except:
+                    return False, f"Không thể tạo thư mục dữ liệu người dùng: {user_data_dir}"
+            
+            # Khởi tạo trình duyệt
+            try:
+                browser = await browser_type.launch_persistent_context(
+                    user_data_dir,
+                    executable_path=executable_path,
+                    headless=False
+                )
+                
+                # Tạo trang mới
+                page = await browser.new_page()
+                return True, f"Khởi tạo trình duyệt {current_browser_type.capitalize()} thành công"
+            except Exception as e:
+                return False, f"Không thể khởi động trình duyệt {current_browser_type.capitalize()}: {str(e)}"
+    except Exception as e:
+        # Xử lý thông báo lỗi an toàn cho HTML
+        error_msg = str(e)
+        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
+        return False, f"Lỗi khi khởi tạo trình duyệt: {safe_error}"
+
+# Đóng browser
+async def close_browser():
+    """Đóng trình duyệt và giải phóng tài nguyên"""
+    global browser, page, playwright
+    
+    try:
+        if page:
+            await page.close()
+            page = None
+        
+        if browser:
+            await browser.close()
+            browser = None
+        
+        if playwright:
+            await playwright.stop()
+            playwright = None
+            
+        return True, "Đã đóng trình duyệt"
+    except Exception as e:
+        return False, f"Lỗi khi đóng trình duyệt: {str(e)}"
+
+# Lệnh chọn trình duyệt mặc định
+async def set_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn trình duyệt mặc định"""
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+        
+    global current_browser_type
+
+    if not context.args:
+        # Tạo danh sách trình duyệt có sẵn
+        available_browsers = {}
+        for browser_name, browser_path in BROWSER_PATHS.items():
+            if os.path.exists(browser_path):
+                available_browsers[browser_name] = browser_path
+        
+        # Nếu không có trình duyệt nào
+        if not available_browsers:
+            await update.message.reply_text(
+                "<b>❌ Không tìm thấy trình duyệt nào được cài đặt trên hệ thống.</b>",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Tạo các nút cho trình duyệt có sẵn
+        keyboard = []
+        browser_row = []
+        
+        for i, browser_name in enumerate(available_browsers.keys()):
+            browser_row.append(InlineKeyboardButton(
+                browser_name.capitalize(), 
+                callback_data=f"browser_{browser_name}"
+            ))
+            
+            # Mỗi hàng chứa 2 nút
+            if len(browser_row) == 2 or i == len(available_browsers) - 1:
+                keyboard.append(browser_row)
+                browser_row = []
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"<b>Trình duyệt hiện tại:</b> {current_browser_type.capitalize()}\n"
+            "<b>Vui lòng chọn trình duyệt mặc định:</b>\n\n"
+            "<i>Lưu ý: Microsoft Edge có thể gặp vấn đề và sẽ tự động chuyển sang trình duyệt khác nếu gặp lỗi. "
+            "Nếu muốn dùng Edge, hãy chạy bot với quyền Admin và đóng tất cả cửa sổ Edge đang mở trước.</i>",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        return
+
+    browser_choice = context.args[0].lower()
+    
+    # Kiểm tra xem trình duyệt có tồn tại không
+    if browser_choice in BROWSER_PATHS and os.path.exists(BROWSER_PATHS[browser_choice]):
+        current_browser_type = browser_choice
+        
+        message = f"<b>✅ Đã đặt {browser_choice.capitalize()} làm trình duyệt mặc định.</b>"
+        if browser_choice == "edge":
+            message += "\n\n<i>Lưu ý: Microsoft Edge có thể gặp vấn đề. Nếu gặp lỗi, bot sẽ tự động chuyển sang trình duyệt khác. "
+            message += "Để tăng khả năng thành công, hãy chạy bot với quyền Admin và đóng các cửa sổ Edge đang mở.</i>"
+            
+        await update.message.reply_text(
+            message,
+            parse_mode="HTML"
+        )
+    else:
+        # Kiểm tra xem trình duyệt có trong danh sách nhưng không tồn tại
+        if browser_choice in BROWSER_PATHS:
+            await update.message.reply_text(
+                f"<b>❌ Không tìm thấy trình duyệt {browser_choice.capitalize()} tại: {BROWSER_PATHS[browser_choice]}</b>",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(
+                "<b>❌ Trình duyệt không hợp lệ. Vui lòng chọn Chrome, Brave, Edge hoặc Opera.</b>",
+                parse_mode="HTML"
+            )
+
+# Xử lý callback chọn trình duyệt
+async def handle_browser_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý khi người dùng chọn trình duyệt từ inline button"""
+    global current_browser_type
+    
+    query = update.callback_query
+    await query.answer()
+    
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+    
+    if not query.data.startswith("browser_"):
+        return
+        
+    browser_choice = query.data.split("_")[1]
+    
+    # Kiểm tra xem trình duyệt có tồn tại không
+    if browser_choice in BROWSER_PATHS and os.path.exists(BROWSER_PATHS[browser_choice]):
+        current_browser_type = browser_choice
+        
+        message = f"<b>✅ Đã đặt {browser_choice.capitalize()} làm trình duyệt mặc định.</b>"
+        if browser_choice == "edge":
+            message += "\n\n<i>Lưu ý: Microsoft Edge có thể gặp vấn đề. Nếu gặp lỗi, bot sẽ tự động chuyển sang trình duyệt khác. "
+            message += "Để tăng khả năng thành công, hãy chạy bot với quyền Admin và đóng các cửa sổ Edge đang mở.</i>"
+            
+        await query.edit_message_text(
+            message,
+            parse_mode="HTML"
+        )
+    else:
+        # Kiểm tra xem trình duyệt có trong danh sách nhưng không tồn tại
+        if browser_choice in BROWSER_PATHS:
+            await query.edit_message_text(
+                f"<b>❌ Không tìm thấy trình duyệt {browser_choice.capitalize()} tại: {BROWSER_PATHS[browser_choice]}</b>",
+                parse_mode="HTML"
+            )
+        else:
+            await query.edit_message_text(
+                "<b>❌ Trình duyệt không hợp lệ. Vui lòng chọn Chrome, Brave, Edge hoặc Opera.</b>",
+                parse_mode="HTML"
+            )
+
+# ĐIỀU KHIỂN TRÌNH DUYỆT
+
+# Tính năng phát video
+async def play_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mở video YouTube và hiển thị các điều khiển"""
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+        
+    global page
+    
+    # Lấy link từ tham số hoặc tin nhắn
+    if context.args:
+        youtube_url = context.args[0]
+    else:
+        youtube_url = update.message.text.strip()
+        if youtube_url.startswith("/playvideo "):
+            youtube_url = youtube_url[11:].strip()
+        else:
+            await update.message.reply_text(
+                "<b>⚠️ Hãy gửi một link YouTube kèm lệnh /playvideo [link].</b>",
+                parse_mode="HTML"
+            )
+            return
+    
+    # Kiểm tra link YouTube hợp lệ
+    youtube_pattern = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+" 
+    if not re.match(youtube_pattern, youtube_url):
+        await update.message.reply_text(
+            "<b>❌ Link YouTube không hợp lệ. Vui lòng kiểm tra lại.</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    try:
+        # Kiểm tra nếu trình duyệt đã khởi tạo chưa
+        if not browser or not page:
+            init_message = await update.message.reply_text(
+                f"<b>🔄 Đang khởi động trình duyệt {current_browser_type.capitalize()}...</b>",
+                parse_mode="HTML"
+            )
+            success, message = await initialize_browser()
+            if not success:
+                # Đảm bảo thông báo lỗi an toàn cho HTML
+                safe_message = message.replace("<", "&lt;").replace(">", "&gt;")
+                await init_message.edit_text(
+                    f"<b>❌ Không thể khởi động trình duyệt:</b> {safe_message}",
+                    parse_mode="HTML"
+                )
+                return
+            else:
+                await init_message.edit_text(
+                    f"<b>✅ Đã khởi động trình duyệt {current_browser_type.capitalize()} thành công.</b>",
+                    parse_mode="HTML"
+                )
+        
+        # Điều hướng đến trang YouTube
+        loading_message = await update.message.reply_text(
+            f"<b>🔄 Đang mở video bằng {current_browser_type.capitalize()}...</b>",
+            parse_mode="HTML"
+        )
+        
+        try:
+            await page.goto(youtube_url, timeout=30000)  # Timeout 30 giây
+            
+            # Chờ video load
+            try:
+                await page.wait_for_selector("video", state="attached", timeout=15000)
+                await loading_message.edit_text(
+                    f"<b>✅ Đã mở video YouTube thành công trên {current_browser_type.capitalize()}.</b>",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Không tìm thấy trình phát video: {e}")
+                await loading_message.edit_text(
+                    "<b>⚠️ Không thể tìm thấy trình phát video. Trang đã được mở nhưng có thể không phải là video YouTube.</b>",
+                    parse_mode="HTML"
+                )
+            
+            # Tạo các nút điều khiển
+            keyboard = [
+                [InlineKeyboardButton("⏯ Phát / Tạm dừng", callback_data="play_pause"),
+                InlineKeyboardButton("⏪ Tua lại 10s", callback_data="rewind")],
+                [InlineKeyboardButton("⏩ Tua tới 10s", callback_data="forward"),
+                InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "<b>🎮 Chọn hành động:</b>",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Lỗi khi mở URL {youtube_url}: {e}")
+            await loading_message.edit_text(
+                f"<b>❌ Không thể mở URL.</b> Kiểm tra kết nối mạng hoặc URL.",
+                parse_mode="HTML"
+            )
+            
+    except Exception as e:
+        # Đảm bảo thông báo lỗi an toàn cho HTML
+        error_msg = str(e)
+        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
+        await update.message.reply_text(
+            f"<b>❌ Có lỗi xảy ra:</b> {safe_error}",
+            parse_mode="HTML"
+        )
+
+# Xử lý button điều khiển video
+async def video_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý các button điều khiển video"""
+    global page, browser
+    
+    query = update.callback_query
+    await query.answer()
+    
+    # Kiểm tra quyền người dùng thông qua update
+    if not await check_user_permission(update):
+        return
+    
+    # Kiểm tra xem page có tồn tại không
+    if not page:
+        await query.edit_message_text(
+            "<b>❌ Không có trình duyệt nào đang mở.</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    action = query.data
+    try:
+        if action == "play_pause":
+            # Thực thi JavaScript để phát/tạm dừng video
+            await page.evaluate("document.querySelector('video').paused ? document.querySelector('video').play() : document.querySelector('video').pause()")
+            await query.edit_message_text(
+                "<b>✅ Đã chuyển trạng thái phát / tạm dừng.</b>",
+                parse_mode="HTML"
+            )
+            
+        elif action == "rewind":
+            # Tua lại 10 giây
+            await page.evaluate("document.querySelector('video').currentTime -= 10")
+            await query.edit_message_text(
+                "<b>⏪ Đã tua lại 10 giây.</b>",
+                parse_mode="HTML"
+            )
+            
+        elif action == "forward":
+            # Tua tiến 10 giây
+            await page.evaluate("document.querySelector('video').currentTime += 10")
+            await query.edit_message_text(
+                "<b>⏩ Đã tua tới 10 giây.</b>",
+                parse_mode="HTML"
+            )
+            
+        elif action == "close_browser":
+            # Đóng trình duyệt
+            success, message = await close_browser()
+            await query.edit_message_text(
+                f"<b>✅ Đã đóng trình duyệt {current_browser_type.capitalize()}.</b>",
+                parse_mode="HTML"
+            )
+            return
+            
+        # Lưu lại và giữ các nút điều khiển video luôn hoạt động (trừ khi đã đóng toàn bộ)
+        if action != "close_browser":
+            keyboard = [
+                [InlineKeyboardButton("⏯ Phát / Tạm dừng", callback_data="play_pause"),
+                 InlineKeyboardButton("⏪ Tua lại 10s", callback_data="rewind")],
+                [InlineKeyboardButton("⏩ Tua tới 10s", callback_data="forward"),
+                 InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_reply_markup(reply_markup=reply_markup)
+            
+    except Exception as e:
+        await query.edit_message_text(
+            f"<b>❌ Có lỗi xảy ra khi điều khiển video:</b> {str(e)}",
+            parse_mode="HTML"
+        )
+
+# Lệnh mở web tùy chỉnh
+async def open_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mở một trang web và hiển thị các điều khiển"""
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+        
+    global page
+    
+    if not context.args:
+        await update.message.reply_text(
+            """
+            <b>⚠️ Hãy nhập URL website bạn muốn mở. Ví dụ:</b>
+            <code>/openweb https://www.google.com</code>
+            <b>hoặc</b>
+            <code>/openweb google.com</code>
+            """,
+            parse_mode="HTML"
+        )
+        return
+    
+    url = " ".join(context.args).strip()
+    
+    try:
+        # Kiểm tra nếu trình duyệt đã khởi tạo chưa
+        if not browser or not page:
+            init_message = await update.message.reply_text(
+                f"<b>🔄 Đang khởi động trình duyệt {current_browser_type.capitalize()}...</b>",
+                parse_mode="HTML"
+            )
+            success, message = await initialize_browser()
+            if not success:
+                # Đảm bảo thông báo lỗi an toàn cho HTML
+                safe_message = message.replace("<", "&lt;").replace(">", "&gt;")
+                await init_message.edit_text(
+                    f"<b>❌ Không thể khởi động trình duyệt:</b> {safe_message}",
+                    parse_mode="HTML"
+                )
+                return
+            else:
+                await init_message.edit_text(
+                    f"<b>✅ Đã khởi động trình duyệt {current_browser_type.capitalize()} thành công.</b>",
+                    parse_mode="HTML"
+                )
+        
+        # Thêm http:// nếu cần
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        # Mở trang web
+        loading_message = await update.message.reply_text(
+            f"<b>🔄 Đang mở trang web {url}...</b>",
+            parse_mode="HTML"
+        )
+        
+        try:
+            await page.goto(url, timeout=30000)  # Timeout 30 giây
+            await loading_message.edit_text(
+                f"<b>✅ Đã mở trang web {url} trong trình duyệt {current_browser_type.capitalize()}.</b>",
+                parse_mode="HTML"
+            )
+            
+            # Tạo các nút điều khiển
+            keyboard = [
+                [InlineKeyboardButton("🔄 Tải lại", callback_data="reload_page"),
+                InlineKeyboardButton("⬅️ Quay lại", callback_data="back_page")],
+                [InlineKeyboardButton("➡️ Tiến tới", callback_data="forward_page"),
+                InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "<b>🎮 Chọn hành động:</b>",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Lỗi khi mở URL {url}: {e}")
+            await loading_message.edit_text(
+                f"<b>❌ Không thể mở URL.</b> Kiểm tra kết nối mạng hoặc URL.",
+                parse_mode="HTML"
+            )
+            
+    except Exception as e:
+        # Đảm bảo thông báo lỗi an toàn cho HTML
+        error_msg = str(e)
+        safe_error = error_msg.replace("<", "&lt;").replace(">", "&gt;")
+        await update.message.reply_text(
+            f"<b>❌ Có lỗi xảy ra khi mở trang web:</b> {safe_error}",
+            parse_mode="HTML"
+        )
+
+# Xử lý các nút điều khiển web
+async def web_controls(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý các button điều khiển trình duyệt"""
+    global page
+    
+    query = update.callback_query
+    await query.answer()
+    
+    # Kiểm tra quyền người dùng
+    if not await check_user_permission(update):
+        return
+    
+    # Kiểm tra xem page có tồn tại không
+    if not page:
+        await query.edit_message_text(
+            "<b>❌ Không có trình duyệt nào đang mở.</b>",
+            parse_mode="HTML"
+        )
+        return
+    
+    action = query.data
+    try:
+        if action == "reload_page":
+            await page.reload()
+            await query.edit_message_text(
+                "<b>🔄 Đã tải lại trang.</b>",
+                parse_mode="HTML"
+            )
+            
+        elif action == "back_page":
+            if await page.evaluate("window.history.length > 1"):
+                await page.go_back()
+                await query.edit_message_text(
+                    "<b>⬅️ Đã quay lại trang trước.</b>",
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    "<b>⚠️ Không có trang trước để quay lại.</b>",
+                    parse_mode="HTML"
+                )
+            
+        elif action == "forward_page":
+            can_go_forward = await page.evaluate("window.history.length > 1 && window.history.state !== null")
+            if can_go_forward:
+                await page.go_forward()
+                await query.edit_message_text(
+                    "<b>➡️ Đã tiến tới trang sau.</b>",
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    "<b>⚠️ Không có trang sau để tiến tới.</b>",
+                    parse_mode="HTML"
+                )
+            
+        elif action == "close_browser":
+            success, message = await close_browser()
+            await query.edit_message_text(
+                f"<b>✅ Đã đóng trình duyệt {current_browser_type.capitalize()}.</b>",
+                parse_mode="HTML"
+            )
+            return
+            
+        # Lưu lại và giữ các nút điều khiển web luôn hoạt động (trừ khi đã đóng toàn bộ)
+        if action != "close_browser":
+            keyboard = [
+                [InlineKeyboardButton("🔄 Tải lại", callback_data="reload_page"),
+                 InlineKeyboardButton("⬅️ Quay lại", callback_data="back_page")],
+                [InlineKeyboardButton("➡️ Tiến tới", callback_data="forward_page"),
+                 InlineKeyboardButton("❌ Đóng trình duyệt", callback_data="close_browser")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_reply_markup(reply_markup=reply_markup)
+            
+    except Exception as e:
+        await query.edit_message_text(
+            f"<b>❌ Có lỗi xảy ra khi điều khiển trình duyệt:</b> {str(e)}",
+            parse_mode="HTML"
+        )
+
 # ĐIỀU KHIỂN HỆ THỐNG
-###########################################
 
 # Lệnh shutdown
 async def shutdown(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3323,9 +3565,7 @@ async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-###########################################
 # LỆNH QUẢN LÝ FILE
-###########################################
 
 # Hàm chụp màn hình
 def capture_high_quality_screenshot():
@@ -3761,7 +4001,6 @@ async def send_video_without_waiting(bot, chat_id, file_path, filename):
     except Exception as e:
         logger.error(f"Lỗi khi gửi video (trong task riêng): {e}")
         # Không gọi API để gửi thông báo lỗi - tránh lỗi callback
-        # Chỉ ghi log để theo dõi
 
 # Xử lý lệnh /download_file
 async def download_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4005,9 +4244,7 @@ async def deletefile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-###########################################
 # LỆNH TRUY VẤN THÔNG TIN HỆ THỐNG
-###########################################
 
 # Ghi kết quả vào file và gửi file
 async def run_command_to_file(update: Update, context: ContextTypes.DEFAULT_TYPE, command: str, file_name: str, encoding='utf-8'):
@@ -4206,9 +4443,7 @@ async def hostname(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await run_command_to_file(update, context, "hostname", "hostname_output.txt")
 
-###########################################
 # CHỨC NĂNG MENU & THÔNG TIN
-###########################################
 
 # Lệnh introduce
 async def introduce(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4219,6 +4454,8 @@ async def introduce(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await update.message.reply_text(
         "<b>👨‍💻 DEVELOPER | LÊ PHI ANH</b>\n\n"
+        
+        "<strong>Bất cứ dự án hay công việc nào bạn muốn hợp tác, tôi luôn sẵn sàng. Hãy liên hệ ngay để cùng nhau tạo ra những giá trị tốt đẹp!</strong>\n\n"
         
         "<b>📩 CONTACT FOR WORK:</b>\n"
         "• Discord: <code>LePhiAnhDev</code>\n"
@@ -4234,6 +4471,7 @@ async def introduce(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Nhấn <b>/menu</b> để xem danh sách các lệnh",
         parse_mode="HTML"
     )
+
 
 # Lệnh menu
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4265,9 +4503,7 @@ async def set_command_suggestions(context: ContextTypes.DEFAULT_TYPE):
     commands = [BotCommand(command, desc) for command, desc in COMMANDS.items()]
     await context.bot.set_my_commands(commands)
 
-###########################################
 # KHỞI CHẠY BOT
-###########################################
 
 async def main():
     """Hàm chính để khởi chạy bot"""
@@ -4329,6 +4565,7 @@ async def main():
     # Thêm lệnh touchpad ảo
     app.add_handler(CommandHandler("mouse_virtual_system", mouse_virtual_system))
     app.add_handler(CommandHandler("volume_virtual_system", volume_virtual_system))
+    app.add_handler(CommandHandler("stop_touchpad", stop_touchpad_command))
     app.add_handler(CallbackQueryHandler(refresh_touchpad, pattern="^refresh_touchpad$"))
     app.add_handler(CallbackQueryHandler(refresh_volume_touchpad, pattern="^refresh_volume_touchpad$"))
     
@@ -4367,7 +4604,10 @@ async def main():
         # Dừng Ngrok nếu đang chạy
         if 'ngrok_tunnel' in globals() and ngrok_tunnel:
             logger.info(f"Đóng kết nối Ngrok: {ngrok_tunnel.public_url}")
-            ngrok.disconnect(ngrok_tunnel.public_url)
+            try:
+                ngrok.disconnect(ngrok_tunnel.public_url)
+            except Exception as e:
+                logger.error(f"Lỗi khi đóng kết nối Ngrok: {e}")
             
         # Dừng Flask server nếu đang chạy
         logger.info("Flask server sẽ tự động dừng khi chương trình kết thúc")
